@@ -1,16 +1,26 @@
 optimizer : {
   type: AdamW,
   kwargs: {
-  lr : 0.0001, 
-  weight_decay : 0.0005
+  lr : 0.00008, #0.0001
+  weight_decay : 0.001 #0.0005
 }}
 
+#scheduler: {
+#  type: LambdaLR,
+#  kwargs: {
+#  decay_step: 42, #21
+#  lr_decay: 0.9,
+#  lowest_decay: 0.02  # min lr = lowest_decay * lr
+#}}
+
 scheduler: {
-  type: LambdaLR,
+  type: CosLR,
   kwargs: {
-  decay_step: 21,
-  lr_decay: 0.9,
-  lowest_decay: 0.02  # min lr = lowest_decay * lr
+    t_max: 80,               # This corresponds to t_initial in the scheduler
+    min_lr: 0.000001,            # This corresponds to lr_min in the scheduler
+    initial_epochs: 4,       # This corresponds to warmup_t in the scheduler  #10
+    warmup_lr_init: 0.00001,
+    t_in_epochs: True
 }}
 
 bnmscheduler: {
@@ -23,21 +33,21 @@ bnmscheduler: {
 }}
 
 dataset : {
-  train : { _base_: cfgs/dataset_configs/PCN.yaml, 
+  train : { _base_: cfgs/dataset_configs/ShapeNet_Car_Seq.yaml,  #cfgs/dataset_configs/PCN.yaml
             others: {subset: 'train'}},
-  val : { _base_: cfgs/dataset_configs/PCN.yaml, 
+  val : { _base_: cfgs/dataset_configs/ShapeNet_Car_Seq.yaml, 
             others: {subset: 'test'}},
-  test : { _base_: cfgs/dataset_configs/PCN.yaml, 
+  test : { _base_: cfgs/dataset_configs/ShapeNet_Car_Seq.yaml, 
             others: {subset: 'test'}}}
             
 model : {
     NAME: AdaPoinTr, 
     num_query: 512, 
     num_points: 16384,
-    center_num: [512, 256],
+    center_num: [128, 64],  #[512, 256], [128, 64]
     global_feature_dim: 1024, 
     encoder_type: graph,
-    decoder_type: fc,
+    decoder_type: fc,  #fc
     encoder_config: {
       embed_dim: 384,
       depth: 6,
@@ -62,8 +72,10 @@ model : {
     }
 }
   
-total_bs : 16
-step_per_update : 1
-max_epoch : 600
+total_bs : 16 #16  #4
+step_per_update : 2 #1 #2  #4
+max_epoch : 80 #600
+
+patience: 20
 
 consider_metric: CDL1

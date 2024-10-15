@@ -40,23 +40,43 @@ class PCN(data.Dataset):
     def _get_transforms(self, subset):
         if subset == 'train':
             return data_transforms.Compose([{
-                'callback': 'RandomSamplePoints',
+                'callback': 'UpSamplePoints',  #RandomSamplePoints
                 'parameters': {
-                    'n_points': 2048
+                    'n_points': 256  #2048
                 },
                 'objects': ['partial']
             }, {
+                'callback': 'RandomScalePoints',
+                'parameters': {
+                    'scale_range': [0.8, 1.2]
+                },
+                'objects': ['partial', 'gt']
+            }, {
                 'callback': 'RandomMirrorPoints',
                 'objects': ['partial', 'gt']
-            },{
+            }, {
+                'callback': 'RandomRotatePoints',
+                'parameters': {
+                    'roll_angle': [-np.pi/18, np.pi/18],
+                    'pitch_angle': [-np.pi/18, np.pi/18],
+                    'yaw_angle': [-np.pi/6, np.pi/6]
+                },
+                'objects': ['partial', 'gt']
+            }, {
+                'callback': 'RandomTranslatePoints',
+                'parameters': {
+                    'translate_range': [[-0.2, 0.2], [-0.4, 0.4], [-0.4, 0.4]]
+                },
+                'objects': ['partial', 'gt']
+            }, {
                 'callback': 'ToTensor',
                 'objects': ['partial', 'gt']
             }])
         else:
             return data_transforms.Compose([{
-                'callback': 'RandomSamplePoints',
+                'callback': 'UpSamplePoints',  #RandomSamplePoints
                 'parameters': {
-                    'n_points': 2048
+                    'n_points': 256  #2048
                 },
                 'objects': ['partial']
             }, {
@@ -100,6 +120,8 @@ class PCN(data.Dataset):
                 file_path = file_path[rand_idx]
             data[ri] = IO.get(file_path).astype(np.float32)
 
+        if data['gt'].shape[0] != self.npoints:
+            print(f"Error at index {idx}: Expected {self.npoints}, but got {data['gt'].shape[0]}")
         assert data['gt'].shape[0] == self.npoints
 
         if self.transforms is not None:
@@ -136,13 +158,33 @@ class PCNv2(data.Dataset):
             return data_transforms.Compose([{
                 'callback': 'UpSamplePoints',
                 'parameters': {
-                    'n_points': 2048
+                    'n_points': 256  #2048
                 },
                 'objects': ['partial']
             }, {
+                'callback': 'RandomScalePoints',
+                'parameters': {
+                    'scale_range': [0.8, 1.2]
+                },
+                'objects': ['partial', 'gt']
+            }, {
                 'callback': 'RandomMirrorPoints',
                 'objects': ['partial', 'gt']
-            },{
+            }, {
+                'callback': 'RandomRotatePoints',
+                'parameters': {
+                    'roll_angle': [-np.pi/18, np.pi/18],
+                    'pitch_angle': [-np.pi/18, np.pi/18],
+                    'yaw_angle': [-np.pi/6, np.pi/6]
+                },
+                'objects': ['partial', 'gt']
+            }, {
+                'callback': 'RandomTranslatePoints',
+                'parameters': {
+                    'translate_range': [[-0.2, 0.2], [-0.4, 0.4], [-0.4, 0.4]]
+                },
+                'objects': ['partial', 'gt']
+            }, {
                 'callback': 'ToTensor',
                 'objects': ['partial', 'gt']
             }])
@@ -150,7 +192,7 @@ class PCNv2(data.Dataset):
             return data_transforms.Compose([{
                 'callback': 'UpSamplePoints',
                 'parameters': {
-                    'n_points': 2048
+                    'n_points': 256  #2048
                 },
                 'objects': ['partial']
             }, {

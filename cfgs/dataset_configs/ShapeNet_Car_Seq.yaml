@@ -1,0 +1,7 @@
+NAME: ShapeNet_Car_Seq
+CATEGORY_FILE_PATH: data/ShapeNet_Car_Seq/ShapeNet_Car_Seq.json
+N_POINTS: 16384
+N_TRAJS: 15
+PARTIAL_POINTS_PATH: data/ShapeNet_Car_Seq/%s/partial/%s/%s/
+COMPLETE_POINTS_PATH: data/ShapeNet_Car_Seq/%s/complete/%s.pcd  #/%s
+# CARS: FALSE

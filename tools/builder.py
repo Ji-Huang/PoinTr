@@ -75,6 +75,7 @@ def build_scheduler(base_model, optimizer, config, last_epoch=-1):
                 t_initial=sche_config.kwargs.t_max,
                 lr_min=sche_config.kwargs.min_lr,
                 warmup_t=sche_config.kwargs.initial_epochs,
+                warmup_lr_init=sche_config.kwargs.warmup_lr_init,
                 t_in_epochs=True)
     else:
         raise NotImplementedError()

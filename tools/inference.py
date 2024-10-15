@@ -67,7 +67,7 @@ def inference_single(model, pc_path, args, config, root=None):
     transform = Compose([{
         'callback': 'UpSamplePoints',
         'parameters': {
-            'n_points': 2048
+            'n_points': 256  #2048
         },
         'objects': ['input']
     }, {
@@ -76,9 +76,17 @@ def inference_single(model, pc_path, args, config, root=None):
     }])
     
     pc_ndarray_normalized = transform({'input': pc_ndarray})
+
+    # Save the processed point cloud before inference
+    # if args.out_pc_root != '':
+    #     target_path = os.path.join(args.out_pc_root, os.path.splitext(pc_path)[0])
+    #     os.makedirs(target_path, exist_ok=True)
+    #     np.save(os.path.join(target_path, 'processed.npy'), pc_ndarray_normalized['input'].numpy())
+
     # inference
     ret = model(pc_ndarray_normalized['input'].unsqueeze(0).to(args.device.lower()))
     dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
+    coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
 
     if config.dataset.train._base_['NAME'] == 'ShapeNet':
         # denormalize it to adapt for the original input
@@ -90,6 +98,7 @@ def inference_single(model, pc_path, args, config, root=None):
         os.makedirs(target_path, exist_ok=True)
 
         np.save(os.path.join(target_path, 'fine.npy'), dense_points)
+        np.save(os.path.join(target_path, 'coarse.npy'), coarse_points)
         if args.save_vis_img:
             input_img = misc.get_ptcloud_img(pc_ndarray_normalized['input'].numpy())
             dense_img = misc.get_ptcloud_img(dense_points)

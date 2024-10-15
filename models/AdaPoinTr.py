@@ -691,7 +691,7 @@ class SimpleEncoder(nn.Module):
 
 ######################################## Fold ########################################    
 class Fold(nn.Module):
-    def __init__(self, in_channel, step , hidden_dim=512):
+    def __init__(self, in_channel, step, hidden_dim):
         super().__init__()
 
         self.in_channel = in_channel
@@ -718,6 +718,7 @@ class Fold(nn.Module):
             nn.Conv1d(hidden_dim, hidden_dim//2, 1),
             nn.BatchNorm1d(hidden_dim//2),
             nn.ReLU(inplace=True),
+            # nn.MaxPool1d(kernel_size=2, stride=2),  # NEW! Reduces spatial dimension
             nn.Conv1d(hidden_dim//2, 3, 1),
         )
 
@@ -727,10 +728,13 @@ class Fold(nn.Module):
         features = x.view(bs, self.in_channel, 1).expand(bs, self.in_channel, num_sample)
         seed = self.folding_seed.view(1, 2, num_sample).expand(bs, 2, num_sample).to(x.device)
 
-        x = torch.cat([seed, features], dim=1)
-        fd1 = self.folding1(x)
+        x = torch.cat([seed, features], dim=1)  #torch.Size([9216, 386, 64])
+        # print(f"x shape: {x.shape}")
+        fd1 = self.folding1(x)  # torch.Size([9216, 3, 64])
+        # print(f"fd1 shape: {fd1.shape}")
         x = torch.cat([fd1, features], dim=1)
-        fd2 = self.folding2(x)
+        fd2 = self.folding2(x)  # torch.Size([9216, 3, 64])
+        # print(f"fd2 shape: {fd2.shape}")
 
         return fd2
 
@@ -753,11 +757,66 @@ class SimpleRebuildFCLayer(nn.Module):
                 g_feature.unsqueeze(1).expand(-1, token_feature.size(1), -1),
                 token_feature
             ], dim = -1)
-        rebuild_pc = self.layer(patch_feature).reshape(batch_size, -1, self.step , 3)
+        rebuild_pc = self.layer(patch_feature).reshape(batch_size, -1, self.step, 3)
         assert rebuild_pc.size(1) == rec_feature.size(1)
+        # print(f"rebuild_pc: {rebuild_pc.shape}")
         return rebuild_pc
 
-######################################## PCTransformer ########################################   
+######################################## PCTransformer ########################################
+class RelativePositionalEmbedding(nn.Module):
+    def __init__(self, in_chans, embed_dim):
+        """
+        :param in_chans: Input channels, typically 3 for 3D point clouds (x, y, z).
+        :param embed_dim: Final embedding dimension after projecting relative positions.
+        :param num_points: Number of points in the point cloud.
+        """
+        super(RelativePositionalEmbedding, self).__init__()
+
+        # Define a linear layer to project relative distances to a higher-dimensional space
+        self.pos_proj = nn.Sequential(
+            nn.Linear(in_chans, 128),  # Project 3D relative position (dx, dy, dz) to 128
+            nn.GELU(),  # Non-linear activation
+            nn.Linear(128, embed_dim)  # Project to the final embedding dimension
+        )
+
+         # Define a convolutional layer to reduce the embedding dimension
+        # self.conv = nn.Conv1d(
+        #     in_channels=embed_dim,
+        #     out_channels=embed_dim,
+        #     kernel_size=1,  # 1x1 convolution to reduce the dimension
+        #     bias=False
+        # )
+
+    def forward(self, points):
+        """
+        :param points: Tensor of shape (batch_size, num_points, in_chans), where each point has 3 channels (x, y, z).
+        :return: Tensor of shape (batch_size, num_points, num_points, embed_dim), representing relative positional embeddings.
+        """
+
+        # Compute pairwise relative positions (dx, dy, dz) between points
+        # Expand dims for broadcasting to compute pairwise differences
+        points_1 = points.unsqueeze(2)  # (batch_size, num_points, 1, 3)
+        points_2 = points.unsqueeze(1)  # (batch_size, 1, num_points, 3)
+
+        relative_positions = points_1 - points_2  # (batch_size, num_points, num_points, 3)
+
+        # Pass relative positions through the projection network
+        relative_pos_embedding = self.pos_proj(relative_positions)  # (batch_size, num_points, num_points, embed_dim)
+        relative_pos_embedding = torch.mean(relative_pos_embedding, dim=2)[0]  # (batch_size, num_points, embed_dim)
+
+        # relative_pos_embedding = relative_pos_embedding.permute(0, 2, 1, 3)  # (batch_size, num_points, embed_dim, num_points)
+        # relative_pos_embedding = relative_pos_embedding.contiguous().view(-1, relative_pos_embedding.size(2), relative_pos_embedding.size(3))
+        # # (batch_size, num_points, embed_dim, num_points) -> (batch_size * num_points, embed_dim, num_points)
+
+        # # Apply convolution to reduce the dimension
+        # reduced_embedding = self.conv(relative_pos_embedding)  # (batch_size * num_points, embed_dim, num_points)
+
+        # # Reshape back to (batch_size, num_points, embed_dim)
+        # reduced_embedding = reduced_embedding.view(relative_positions.size(0), -1, reduced_embedding.size(1))
+
+        return relative_pos_embedding
+
+
 class PCTransformer(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -777,11 +836,12 @@ class PCTransformer(nn.Module):
             self.grouper = DGCNN_Grouper(k = 16)
         else:
             self.grouper = SimpleEncoder(k = 32, embed_dims=512)
-        self.pos_embed = nn.Sequential(
-            nn.Linear(in_chans, 128),
-            nn.GELU(),
-            nn.Linear(128, encoder_config.embed_dim)
-        )  
+        # self.pos_embed = nn.Sequential(
+        #     nn.Linear(in_chans, 128),
+        #     nn.GELU(),
+        #     nn.Linear(128, encoder_config.embed_dim)
+        # )
+        self.pos_embed = RelativePositionalEmbedding(in_chans=in_chans, embed_dim=encoder_config.embed_dim)
         self.input_proj = nn.Sequential(
             nn.Linear(self.grouper.num_features, 512),
             nn.GELU(),
@@ -841,6 +901,9 @@ class PCTransformer(nn.Module):
         pe =  self.pos_embed(coor)
         x = self.input_proj(f)
 
+        # print(coor.size(), f.size(), pe.size(), x.size())
+        # torch.Size([16, 256, 3]) torch.Size([16, 256, 128]) torch.Size([16, 256, 384]) torch.Size([16, 256, 384])
+        # torch.Size([16, 64, 3]) torch.Size([16, 64, 128]) torch.Size([16, 64, 384]) torch.Size([16, 64, 384])
         x = self.encoder(x + pe, coor) # b n c
         global_feature = self.increase_dim(x) # B 1024 N 
         global_feature = torch.max(global_feature, dim=1)[0] # B 1024
@@ -922,6 +985,7 @@ class AdaPoinTr(nn.Module):
             nn.Conv1d(1024, 1024, 1)
         )
         self.reduce_map = nn.Linear(self.trans_dim + 1027, self.trans_dim)
+        self.reduce_dim = nn.Linear(64, 32)
         self.build_loss_func()
 
     def build_loss_func(self):
@@ -929,13 +993,17 @@ class AdaPoinTr(nn.Module):
 
     def get_loss(self, ret, gt, epoch=1):
         pred_coarse, denoised_coarse, denoised_fine, pred_fine = ret
+        # print(pred_coarse.size(), denoised_coarse.size(), denoised_fine.size(), pred_fine.size())
         
         assert pred_fine.size(1) == gt.size(1)
 
         # denoise loss
-        idx = knn_point(self.factor, gt, denoised_coarse) # B n k 
-        denoised_target = index_points(gt, idx) # B n k 3 
+        idx = knn_point(self.factor, gt, denoised_coarse) # B n k  #idx = knn_point(self.factor//2, gt, denoised_coarse
+        denoised_target = index_points(gt, idx) # B n k 3
+        # print(denoised_target.shape)
         denoised_target = denoised_target.reshape(gt.size(0), -1, 3)
+        # print(denoised_target.shape)
+        # print(denoised_fine.size())
         assert denoised_target.size(1) == denoised_fine.size(1)
         loss_denoised = self.loss_func(denoised_fine, denoised_target)
         loss_denoised = loss_denoised * 0.5
@@ -949,7 +1017,9 @@ class AdaPoinTr(nn.Module):
 
     def forward(self, xyz):
         q, coarse_point_cloud, denoise_length = self.base_model(xyz) # B M C and B M 3
-    
+        # print(q.size(), coarse_point_cloud.size(), denoise_length)
+        # torch.Size([16, 576, 384]), torch.Size([16, 576, 3]), 64
+        # torch.Size([16, 576, 384]) torch.Size([16, 576, 3]) 64
         B, M ,C = q.shape
 
         global_feature = self.increase_dim(q.transpose(1,2)).transpose(1,2) # B M 1024
@@ -960,17 +1030,25 @@ class AdaPoinTr(nn.Module):
             q,
             coarse_point_cloud], dim=-1)  # B M 1027 + C
 
-        
+        # print(f'rebuild_feature.shape: {rebuild_feature.shape}')  # torch.Size([16, 576, 1411])
         # NOTE: foldingNet
         if self.decoder_type == 'fold':
-            rebuild_feature = self.reduce_map(rebuild_feature.reshape(B*M, -1)) # BM C
-            relative_xyz = self.decode_head(rebuild_feature).reshape(B, M, 3, -1)    # B M 3 S
-            rebuild_points = (relative_xyz + coarse_point_cloud.unsqueeze(-1)).transpose(2,3)  # B M S 3
+            rebuild_feature = self.reduce_map(rebuild_feature.reshape(B*M, -1)) # BM C  torch.Size([9216, 384])
+            # print(f'rebuild_feature.shape: {rebuild_feature.shape}')
+            relative_xyz = self.decode_head(rebuild_feature).reshape(B, M, 3, -1)    # B M 3 S  #torch.Size([9216, 3, 64]) ->  torch.Size([16, 576, 3, 64])
+            # Apply the linear layer to reduce from 64 to 32
+            relative_xyz = self.reduce_dim(relative_xyz)  # B M 3 32
+            # print(f'relative_xyz.shape: {relative_xyz.shape}')
+            rebuild_points = (relative_xyz + coarse_point_cloud.unsqueeze(-1)).transpose(2,3)  # B M S 3  # torch.Size([16, 576, 64, 3])
+            # print(f'rebuild_points.shape: {rebuild_points.shape}')
 
         else:
-            rebuild_feature = self.reduce_map(rebuild_feature) # B M C
-            relative_xyz = self.decode_head(rebuild_feature)   # B M S 3
-            rebuild_points = (relative_xyz + coarse_point_cloud.unsqueeze(-2))  # B M S 3
+            rebuild_feature = self.reduce_map(rebuild_feature)  # B M C # torch.Size([16, 576, 384])
+            # print(f'fc_rebuild_feature.shape: {rebuild_feature.shape}')
+            relative_xyz = self.decode_head(rebuild_feature)   # B M S 3  #torch.Size([16, 576, 32, 3])
+            # print(f'fc_relative_xyz.shape: {relative_xyz.shape}')
+            rebuild_points = (relative_xyz + coarse_point_cloud.unsqueeze(-2))  # B M S 3  # torch.Size([16, 576, 32, 3])
+            # print(f'fc_rebuild_points.shape: {rebuild_points.shape}')
 
         if self.training:
             # split the reconstruction and denoise task
@@ -979,9 +1057,11 @@ class AdaPoinTr(nn.Module):
 
             denoised_fine = rebuild_points[:, -denoise_length:].reshape(B, -1, 3).contiguous()
             denoised_coarse = coarse_point_cloud[:, -denoise_length:].contiguous()
+            # print(pred_fine.size)
+            # print(pred_coarse.size)
 
-            assert pred_fine.size(1) == self.num_query * self.factor
-            assert pred_coarse.size(1) == self.num_query
+            assert pred_fine.size(1) == 16384  # self.num_query * self.factor
+            assert pred_coarse.size(1) == 512  # self.num_query
 
             ret = (pred_coarse, denoised_coarse, denoised_fine, pred_fine)
             return ret
@@ -990,8 +1070,8 @@ class AdaPoinTr(nn.Module):
             assert denoise_length == 0
             rebuild_points = rebuild_points.reshape(B, -1, 3).contiguous()  # B N 3
 
-            assert rebuild_points.size(1) == self.num_query * self.factor
-            assert coarse_point_cloud.size(1) == self.num_query
+            assert rebuild_points.size(1) == 16384  # self.num_query * self.factor
+            assert coarse_point_cloud.size(1) == 512  # self.num_query
 
             ret = (coarse_point_cloud, rebuild_points)
             return ret
