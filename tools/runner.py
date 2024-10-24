@@ -118,37 +118,47 @@ def run_net(args, config, train_writer=None, val_writer=None):
             dataset_name = config.dataset.train._base_.NAME
             if dataset_name == 'ShapeNet_Car_Seq':
                 # partial = data[0][random.randint(0, 14)].cuda()
-                partial_views = data[0]  # # A list of partial pcds: (1 pcd * 15 trajs) or (all pcds in 1 traj)
+                partial_views = data[0]  # A list of partial pcds (window_size in each traj)
                 gt = data[1].cuda()
                 # print(len(partial_views))
 
-                total_sparse_loss = 0
-                total_dense_loss = 0
+                # total_sparse_loss = 0
+                # total_dense_loss = 0
+                #
+                # # Iterate over each partial view and accumulate the losses
+                # for partial_view in partial_views:
+                #     partial = partial_view.cuda()
+                #
+                #     with autocast(): ######
+                #
+                #         # Forward pass for the current partial view
+                #         ret = base_model(partial)
+                #
+                #         # Compute losses
+                #         sparse_loss, dense_loss = base_model.module.get_loss(ret, gt, epoch)
+                #
+                #     total_sparse_loss += sparse_loss
+                #     total_dense_loss += dense_loss
+                #
+                # # print(f"Memory summary after forward pass, batch {idx}:")
+                # # print(torch.cuda.memory_summary())
+                #
+                # # Average the loss over all partial views
+                # total_sparse_loss /= len(partial_views)
+                # total_dense_loss /= len(partial_views)
 
-                # Iterate over each partial view and accumulate the losses
-                for partial_view in partial_views:
-                    partial = partial_view.cuda()
+                with autocast(): ######
+                    cuda_partials = [partial_view.cuda() for partial_view in partial_views]
 
-                    with autocast(): ######
-                    
-                        # Forward pass for the current partial view
-                        ret = base_model(partial)
-                        
-                        # Compute losses
-                        sparse_loss, dense_loss = base_model.module.get_loss(ret, gt, epoch)
-                    
-                    total_sparse_loss += sparse_loss
-                    total_dense_loss += dense_loss
+                    # Forward pass for the current partial view
+                    ret = base_model(cuda_partials)
 
-                # print(f"Memory summary after forward pass, batch {idx}:")
-                # print(torch.cuda.memory_summary())
-                
-                # Average the loss over all partial views
-                total_sparse_loss /= len(partial_views)
-                total_dense_loss /= len(partial_views)
+                    # Compute losses
+                    sparse_loss, dense_loss = base_model.module.get_loss(ret, gt, epoch)
 
                 # Total loss for the batch
-                _loss = total_sparse_loss + total_dense_loss
+                # _loss = total_sparse_loss + total_dense_loss
+                _loss = sparse_loss + dense_loss
                 # _loss.backward()
                 scaler.scale(_loss).backward() ######
 
@@ -179,7 +189,6 @@ def run_net(args, config, train_writer=None, val_writer=None):
                 losses.update([sparse_loss.item() * 1000, dense_loss.item() * 1000])
             else:
                 losses.update([sparse_loss.item() * 1000, dense_loss.item() * 1000])
-
 
             if args.distributed:
                 torch.cuda.synchronize()
@@ -284,39 +293,55 @@ def validate(base_model, test_dataloader, epoch, ChamferDisL1, ChamferDisL2, val
                 gt = data[1].cuda()
 
                 # Iterate over each partial view
-                view_count = len(partial_views)
-                cumulative_metrics = None  # Re-initialize for each sample in the dataloader
-                for partial_view in partial_views:
-                    partial = partial_view.cuda()
+                # view_count = len(partial_views)
+                # cumulative_metrics = None  # Re-initialize for each sample in the dataloader
+                # for partial_view in partial_views:
+                #     partial = partial_view.cuda()
+                #
+                #     # Forward pass
+                #     ret = base_model(partial)
+                #     coarse_points = ret[0]
+                #     dense_points = ret[-1]
+                #
+                #     # Compute losses for each view and accumulate
+                #     total_sparse_loss_l1 += ChamferDisL1(coarse_points, gt)
+                #     total_sparse_loss_l2 += ChamferDisL2(coarse_points, gt)
+                #     total_dense_loss_l1 += ChamferDisL1(dense_points, gt)
+                #     total_dense_loss_l2 += ChamferDisL2(dense_points, gt)
+                #
+                #     # Compute metrics for each view
+                #     view_metrics = Metrics.get(dense_points, gt)
+                #
+                #     # Accumulate metrics
+                #     if cumulative_metrics is None:
+                #         cumulative_metrics = view_metrics  # Initialize cumulative metrics
+                #     else:
+                #         cumulative_metrics = [cum + view for cum, view in zip(cumulative_metrics, view_metrics)]
+                #
+                # # Average the losses over the number of views
+                # avg_sparse_loss_l1 = total_sparse_loss_l1 / view_count
+                # avg_sparse_loss_l2 = total_sparse_loss_l2 / view_count
+                # avg_dense_loss_l1 = total_dense_loss_l1 / view_count
+                # avg_dense_loss_l2 = total_dense_loss_l2 / view_count
+                #
+                # # Average the metrics over the number of views
+                # avg_metrics = [metric / view_count for metric in cumulative_metrics]
 
-                    # Forward pass
-                    ret = base_model(partial)
-                    coarse_points = ret[0]
-                    dense_points = ret[-1]
+                cuda_partials = [partial_view.cuda() for partial_view in partial_views]
 
-                    # Compute losses for each view and accumulate
-                    total_sparse_loss_l1 += ChamferDisL1(coarse_points, gt)
-                    total_sparse_loss_l2 += ChamferDisL2(coarse_points, gt)
-                    total_dense_loss_l1 += ChamferDisL1(dense_points, gt)
-                    total_dense_loss_l2 += ChamferDisL2(dense_points, gt)
+                # Forward pass for the current partial view
+                ret = base_model(cuda_partials)
 
-                    # Compute metrics for each view
-                    view_metrics = Metrics.get(dense_points, gt)
+                # Compute losses
+                coarse_points = ret[0]
+                dense_points = ret[-1]
 
-                    # Accumulate metrics
-                    if cumulative_metrics is None:
-                        cumulative_metrics = view_metrics  # Initialize cumulative metrics
-                    else:
-                        cumulative_metrics = [cum + view for cum, view in zip(cumulative_metrics, view_metrics)]
+                avg_sparse_loss_l1 = ChamferDisL1(coarse_points, gt)
+                avg_sparse_loss_l2 = ChamferDisL2(coarse_points, gt)
+                avg_dense_loss_l1 = ChamferDisL1(dense_points, gt)
+                avg_dense_loss_l2 = ChamferDisL2(dense_points, gt)
 
-                # Average the losses over the number of views
-                avg_sparse_loss_l1 = total_sparse_loss_l1 / view_count
-                avg_sparse_loss_l2 = total_sparse_loss_l2 / view_count
-                avg_dense_loss_l1 = total_dense_loss_l1 / view_count
-                avg_dense_loss_l2 = total_dense_loss_l2 / view_count
-
-                # Average the metrics over the number of views
-                avg_metrics = [metric / view_count for metric in cumulative_metrics]
+                avg_metrics = Metrics.get(dense_points, gt)
 
                 # Reduce losses and metrics if distributed
                 if args.distributed:

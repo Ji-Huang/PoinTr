@@ -265,7 +265,7 @@ class DeformableLocalAttention(nn.Module):
 
         return out
         
-# support denois task
+# support denoise task
 class DeformableLocalCrossAttention(nn.Module):
     r''' DeformabelLocalAttention for self attn or cross attn
         Query a local region for each token (k x C) and then perform a cross attn among query token(1 x C) and local region (k x C)

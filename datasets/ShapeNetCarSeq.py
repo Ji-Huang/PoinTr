@@ -136,85 +136,56 @@ class ShapeNet_Car_Seq(data.Dataset):
             partial_dir = os.path.dirname(partial_path)
             # List all files in the directory to count available partial files
             available_files = sorted([f for f in os.listdir(partial_dir) if f.endswith('.pcd')])
-            
-            for w in [1, 3, 5, 7]:
-                rand_idx = random.randint(0, len(available_files) - w)
-                partials = []
-                for i in range(w):
-                    partial = IO.get(os.path.join(partial_dir, f'{rand_idx:03}.pcd')).astype(np.float32)
-                    partials.append(partial)
-                    rand_idx += 1
-                points = np.concatenate(partials, axis=0)
-                # print(len(points))
-                # if len(points) > 256:
-                #     points_tensor = torch.tensor(points, dtype=torch.float32).unsqueeze(0).cuda()
-                #     sampled_idx = tpk.furthest_point_sample(points_tensor, torch.as_tensor(256))
-                #     sampled_points = points_tensor[0, sampled_idx[0]].cpu().numpy()
-                #     partial_data = {'partial': sampled_points}
-                # else:
-                partial_data = {'partial': points} #
-                if self.transforms is not None:
-                    partial_data = self.transforms(partial_data)
-                    # print(partial_data['partial'].shape)
-                partials_data.append(partial_data['partial'])
+
+            window_size = 9
+            half_window = window_size // 2
+
+            # # Iterate through each file
+            # for i in range(len(available_files)):
+            # rand_idx = random.randint(0, len(available_files))
+            rand_idx = random.randint(half_window+1, len(available_files)-half_window-1)
+
+            # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
+            for offset in range(-half_window, half_window + 1):
+                idx = rand_idx + offset
+
+                # Ensure the index is within valid bounds
+                if 0 <= idx < len(available_files):
+                    partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
+                    partial_data = {'partial': partial}
+                    if self.transforms is not None:
+                        partial_data = self.transforms(partial_data)
+                    # Append the concatenated result to the list
+                    partials_data.append(partial_data['partial'])
+
         else:
             partial_path = sample['partial_path']
             partials_data = []
 
             partial_dir = os.path.dirname(partial_path)
-            available_files = sorted([f for f in os.listdir(partial_dir) if f.endswith('.pcd')])  #
+            # List all files in the directory to count available partial files
+            available_files = sorted([f for f in os.listdir(partial_dir) if f.endswith('.pcd')])
 
-            # for w in [1, 3, 5, 7]:
-            #     idx = 6
-            #     partials = []
-            #     for i in range(w):
-            #         partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
-            #         partials.append(partial)
-            #         idx += 1
-            #     points = np.concatenate(partials, axis=0)
-            #     # if len(points) > 256:
-            #     #     points_tensor = torch.tensor(points, dtype=torch.float32).unsqueeze(0).cuda()
-            #     #     sampled_idx = tpk.furthest_point_sample(points_tensor, torch.as_tensor(256))
-            #     #     sampled_points = points_tensor[0, sampled_idx[0]].cpu().numpy()
-            #     #     partial_data = {'partial': sampled_points}
-            #     # else:
-            #     partial_data = {'partial': points} #
-            #     if self.transforms is not None:
-            #         partial_data = self.transforms(partial_data)
-            #     partials_data.append(partial_data['partial'])
-
-            # Define the window size (must be an odd number to have a symmetric window around 'i')
-            window_size = 15  # Example: Window size of 3 means we take i-1, i, i+1
+            window_size = 9
             half_window = window_size // 2
 
-            # List to store concatenated partials
-            concatenated_partials_data = []
+            # # Iterate through each file
+            # for i in range(len(available_files)):
+            rand_idx = 6
 
-            # Iterate through each file
-            for i in range(len(available_files)):
-                partials_to_concat = []
+            # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
+            for offset in range(-half_window, half_window + 1):
+                idx = rand_idx + offset
 
-                # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
-                for offset in range(-half_window, half_window + 1):
-                    idx = i + offset
+                # Ensure the index is within valid bounds
+                if 0 <= idx < len(available_files):
+                    partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
+                    partial_data = {'partial': partial}
+                    if self.transforms is not None:
+                        partial_data = self.transforms(partial_data)
+                    # Append the concatenated result to the list
+                    partials_data.append(partial_data['partial'])
 
-                    # Ensure the index is within valid bounds
-                    if 0 <= idx < len(available_files):
-                        partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
-                        partials_to_concat.append(partial)
-
-                # Concatenate the gathered partials along the appropriate axis
-                concatenated_partial = np.concatenate(partials_to_concat, axis=0)
-
-                # Create a dictionary with the concatenated partial
-                partial_data = {'partial': concatenated_partial}
-
-                # Apply transforms if they exist
-                if self.transforms is not None:
-                    partial_data = self.transforms(partial_data)
-
-                # Append the concatenated result to the list
-                partials_data.append(partial_data['partial'])
 
 
 

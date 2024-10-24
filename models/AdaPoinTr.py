@@ -508,7 +508,7 @@ class PointTransformerDecoderEntry(PointTransformerDecoder):
 
 ######################################## Grouper ########################################  
 class DGCNN_Grouper(nn.Module):
-    def __init__(self, k = 16):
+    def __init__(self, k=16):
         super().__init__()
         '''
         K has to be 16
@@ -774,18 +774,12 @@ class RelativePositionalEmbedding(nn.Module):
 
         # Define a linear layer to project relative distances to a higher-dimensional space
         self.pos_proj = nn.Sequential(
-            nn.Linear(in_chans, 128),  # Project 3D relative position (dx, dy, dz) to 128
+            nn.Linear(in_chans, 512),
+            nn.GELU(),
+            nn.Linear(512, 384),
             nn.GELU(),  # Non-linear activation
-            nn.Linear(128, embed_dim)  # Project to the final embedding dimension
+            nn.Linear(384, embed_dim)  # Project to the final embedding dimension
         )
-
-         # Define a convolutional layer to reduce the embedding dimension
-        # self.conv = nn.Conv1d(
-        #     in_channels=embed_dim,
-        #     out_channels=embed_dim,
-        #     kernel_size=1,  # 1x1 convolution to reduce the dimension
-        #     bias=False
-        # )
 
     def forward(self, points):
         """
@@ -795,24 +789,17 @@ class RelativePositionalEmbedding(nn.Module):
 
         # Compute pairwise relative positions (dx, dy, dz) between points
         # Expand dims for broadcasting to compute pairwise differences
-        points_1 = points.unsqueeze(2)  # (batch_size, num_points, 1, 3)
-        points_2 = points.unsqueeze(1)  # (batch_size, 1, num_points, 3)
+        points_1 = points.unsqueeze(2)  # (B, N, 1, 3)
+        points_2 = points.unsqueeze(1)  # (B, 1, N, 3)
 
-        relative_positions = points_1 - points_2  # (batch_size, num_points, num_points, 3)
+        relative_positions = points_1 - points_2  # (B, N, N, 3)
+
+        relative_positions_flattened = relative_positions.view(points.size(0), points.size(1), -1)  # (B, N, N * 3)
+        combined = torch.cat([relative_positions_flattened, points], dim=-1)  # (B, N, N * 3 + 3)
 
         # Pass relative positions through the projection network
-        relative_pos_embedding = self.pos_proj(relative_positions)  # (batch_size, num_points, num_points, embed_dim)
-        relative_pos_embedding = torch.mean(relative_pos_embedding, dim=2)[0]  # (batch_size, num_points, embed_dim)
-
-        # relative_pos_embedding = relative_pos_embedding.permute(0, 2, 1, 3)  # (batch_size, num_points, embed_dim, num_points)
-        # relative_pos_embedding = relative_pos_embedding.contiguous().view(-1, relative_pos_embedding.size(2), relative_pos_embedding.size(3))
-        # # (batch_size, num_points, embed_dim, num_points) -> (batch_size * num_points, embed_dim, num_points)
-
-        # # Apply convolution to reduce the dimension
-        # reduced_embedding = self.conv(relative_pos_embedding)  # (batch_size * num_points, embed_dim, num_points)
-
-        # # Reshape back to (batch_size, num_points, embed_dim)
-        # reduced_embedding = reduced_embedding.view(relative_positions.size(0), -1, reduced_embedding.size(1))
+        relative_pos_embedding = self.pos_proj(combined)  # (batch_size, num_points, embed_dim)
+        # relative_pos_embedding = torch.mean(relative_pos_embedding, dim=2)[0]  # (batch_size, num_points, embed_dim)
 
         return relative_pos_embedding
 
@@ -822,20 +809,21 @@ class PCTransformer(nn.Module):
         super().__init__()
         encoder_config = config.encoder_config
         decoder_config = config.decoder_config
-        self.center_num  = getattr(config, 'center_num', [512, 128])
+        self.center_num = getattr(config, 'center_num', [512, 128])
         self.encoder_type = config.encoder_type
         assert self.encoder_type in ['graph', 'pn'], f'unexpected encoder_type {self.encoder_type}'
 
-        in_chans = 3
+        in_chans = 3 * self.center_num[-1] + 3
+        print(in_chans)
         self.num_query = query_num = config.num_query
         global_feature_dim = config.global_feature_dim
 
         print_log(f'Transformer with config {config}', logger='MODEL')
         # base encoder
         if self.encoder_type == 'graph':
-            self.grouper = DGCNN_Grouper(k = 16)
+            self.grouper = DGCNN_Grouper(k=16)
         else:
-            self.grouper = SimpleEncoder(k = 32, embed_dims=512)
+            self.grouper = SimpleEncoder(k=32, embed_dims=512)
         # self.pos_embed = nn.Sequential(
         #     nn.Linear(in_chans, 128),
         #     nn.GELU(),
@@ -881,7 +869,7 @@ class PCTransformer(nn.Module):
             nn.Linear(256, 256),
             nn.GELU(),
             nn.Linear(256, 1),
-            nn.Sigmoid()
+            nn.Softmax(dim=1)
         )
 
         self.apply(self._init_weights)
@@ -898,27 +886,28 @@ class PCTransformer(nn.Module):
     def forward(self, xyz):
         bs = xyz.size(0)
         coor, f = self.grouper(xyz, self.center_num) # b n c
-        pe =  self.pos_embed(coor)
+        pe = self.pos_embed(coor)
         x = self.input_proj(f)
 
         # print(coor.size(), f.size(), pe.size(), x.size())
         # torch.Size([16, 256, 3]) torch.Size([16, 256, 128]) torch.Size([16, 256, 384]) torch.Size([16, 256, 384])
         # torch.Size([16, 64, 3]) torch.Size([16, 64, 128]) torch.Size([16, 64, 384]) torch.Size([16, 64, 384])
         x = self.encoder(x + pe, coor) # b n c
-        global_feature = self.increase_dim(x) # B 1024 N 
+        global_feature = self.increase_dim(x) # B N 1024
         global_feature = torch.max(global_feature, dim=1)[0] # B 1024
 
-        coarse = self.coarse_pred(global_feature).reshape(bs, -1, 3)
+        coarse_p = self.coarse_pred(global_feature).reshape(bs, -1, 3) # B 512 3
 
-        coarse_inp = misc.fps(xyz, self.num_query//2) # B 128 3
-        coarse = torch.cat([coarse, coarse_inp], dim=1) # B 224+128 3?
+        # coarse_inp = misc.fps(xyz, self.num_query//2) # B 256 3
+
+        coarse = torch.cat([coarse_p, coor], dim=1) # B 512+64 3? #
 
         mem = self.mem_link(x)
 
         # query selection
         query_ranking = self.query_ranking(coarse) # b n 1
         idx = torch.argsort(query_ranking, dim=1, descending=True) # b n 1
-        coarse = torch.gather(coarse, 1, idx[:,:self.num_query].expand(-1, -1, coarse.size(-1)))
+        coarse = torch.gather(coarse, 1, idx[:, :self.num_query].unsqueeze(-1).expand(-1, -1, coarse.size(-1))) #
 
         if self.training:
             # add denoise task
@@ -932,7 +921,7 @@ class PCTransformer(nn.Module):
             q = self.mlp_query(
             torch.cat([
                 global_feature.unsqueeze(1).expand(-1, coarse.size(1), -1),
-                coarse], dim = -1)) # b n c
+                coarse], dim=-1)) # b n c
 
             # forward decoder
             q = self.decoder(q=q, v=mem, q_pos=coarse, v_pos=coor, denoise_length=denoise_length)
@@ -944,12 +933,351 @@ class PCTransformer(nn.Module):
             q = self.mlp_query(
             torch.cat([
                 global_feature.unsqueeze(1).expand(-1, coarse.size(1), -1),
-                coarse], dim = -1)) # b n c
+                coarse], dim=-1)) # b n c
             
             # forward decoder
             q = self.decoder(q=q, v=mem, q_pos=coarse, v_pos=coor)
 
             return q, coarse, 0
+
+
+class PCTransformerEn(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        encoder_config = config.encoder_config
+        self.center_num = getattr(config, 'center_num', [512, 128])
+        self.encoder_type = config.encoder_type
+        assert self.encoder_type in ['graph', 'pn'], f'unexpected encoder_type {self.encoder_type}'
+
+        in_chans = 3 * self.center_num[-1] + 3
+
+        print_log(f'Transformer with config {config}', logger='MODEL')
+        # base encoder
+        if self.encoder_type == 'graph':
+            self.grouper = DGCNN_Grouper(k=16)
+        else:
+            self.grouper = SimpleEncoder(k=32, embed_dims=512)
+
+        self.pos_embed = RelativePositionalEmbedding(in_chans=in_chans, embed_dim=encoder_config.embed_dim)
+        self.input_proj = nn.Sequential(
+            nn.Linear(self.grouper.num_features, 512),
+            nn.GELU(),
+            nn.Linear(512, encoder_config.embed_dim)
+        )
+        # Coarse Level 1 : Encoder
+        self.encoder = PointTransformerEncoderEntry(encoder_config)
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward(self, xyz):
+        coor, f = self.grouper(xyz, self.center_num)  # b n c
+        pe = self.pos_embed(coor)
+        x = self.input_proj(f)
+
+        # print(coor.size(), f.size(), pe.size(), x.size())
+        # torch.Size([16, 256, 3]) torch.Size([16, 256, 128]) torch.Size([16, 256, 384]) torch.Size([16, 256, 384])
+        # torch.Size([16, 64, 3]) torch.Size([16, 64, 128]) torch.Size([16, 64, 384]) torch.Size([16, 64, 384])
+        x = self.encoder(x + pe, coor)  # b n c
+
+        # combined = torch.cat([coor, x], dim=-1)  # (B, 64, 3+384)
+
+        return coor, x
+
+
+class PCAttention(nn.Module):
+    def __init__(self, dim, num_point_clouds, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., drop_path=0.):
+        super().__init__()
+        # Set num_heads equal to num_point_clouds
+        self.num_heads = num_point_clouds
+        head_dim = dim // self.num_heads  # Each head's dimensionality
+        self.scale = qk_scale or head_dim ** -0.5  # Scaling factor for attention
+
+        # Multi-head QKV projection (where each head corresponds to a point cloud)
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+
+        # Dropout layers
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, head_dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+        # Use DropPath from timm for stochastic depth regularization
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+        # Layer normalization
+        self.norm1 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(head_dim)
+
+        # Feedforward network after attention
+        self.mlp = nn.Sequential(
+            nn.Linear(head_dim, 4 * head_dim),  # Expand dimensions in the FFN
+            nn.GELU(),
+            nn.Linear(4 * head_dim, head_dim),  # Project back to the original dimension
+            nn.Dropout(proj_drop)
+        )
+
+    def forward(self, x, mask=None):
+        B, N, C = x.shape
+
+        # Pre-layer normalization
+        x = self.norm1(x)
+
+        # Compute QKV, where each head processes one point cloud
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]   # Separate into query, key, value tensors
+
+        # Scaled dot-product attention
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+
+        # Apply mask (if provided)
+        if mask is not None:
+            mask_value = -torch.finfo(attn.dtype).max
+            attn = attn.masked_fill(mask, mask_value)
+
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        # Attention-weighted sum of values
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+
+        # Residual connection and dropout
+        x = self.drop_path(x)
+
+        # Layer normalization and feedforward network
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+
+        coor = x[:, :, :3]  # (B, 64, 3)
+        updated_x = x[:, :, 3:]  # (B, 64, 384)
+
+        return [coor, updated_x]
+
+
+class SpatialTemporalAttention(nn.Module):
+    def __init__(self, config, qkv_bias=False, attn_drop=0., proj_drop=0.):
+        super(SpatialTemporalAttention, self).__init__()
+
+        spatial_config = config.spatial_config
+        encoder_config = config.encoder_config
+        dim = encoder_config.embed_dim
+        # Define spatial attention (intra-cloud)
+        self.spatial_attention = PointTransformerEncoderEntry(spatial_config)
+
+        # Define temporal attention (inter-cloud)
+        self.temporal_attention = nn.MultiheadAttention(embed_dim=dim, num_heads=encoder_config.num_heads, bias=qkv_bias,
+                                                        dropout=attn_drop)
+
+        # Norm layers for spatial and temporal attention
+        self.norm1_spatial = nn.LayerNorm(dim)
+        self.norm2_temporal = nn.LayerNorm(dim)
+
+        # Projection layer to fuse spatial and temporal embeddings
+        self.proj = nn.Linear(dim * 2, dim)  # Fuse spatial and temporal embeddings
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, coor, x):
+        """
+        coor: (B, N, 3) -> Coordinates of the center points.
+        x: (B, T, N, C) -> Embeddings of the point clouds.
+           B = batch size, T = number of temporal views, N = number of points per cloud, C = embedding dimension.
+        """
+        B, T, N, C = x.shape
+
+        # Step 1: Spatial Attention for each partial point cloud
+        x_spatial_fused = []
+        for t in range(T):  # Process each time step separately for spatial attention
+            x_t = x[:, t, :, :]  # (B, N, C) for time step t
+            coor_t = coor[:, t, :, :]
+
+            # Apply spatial attention
+            x_spatial = self.spatial_attention(x_t, coor_t)  # (B, N, C)
+            x_spatial = self.norm1_spatial(x_spatial)  # (B, N, C)
+            x_spatial_fused.append(x_spatial)
+
+        # Stack spatial embeddings into (B, T, N, C) shape
+        x_spatial_fused = torch.stack(x_spatial_fused, dim=1)  # (B, T, N, C)
+
+        # Step 2: Temporal Attention across different point clouds
+        # Reshape x_spatial_fused to (B * N, T, C) for temporal attention
+        x_temporal_input = x_spatial_fused.permute(0, 2, 1, 3).reshape(B * N, T, C)
+
+        # Apply temporal attention
+        x_temporal, _ = self.temporal_attention(x_temporal_input, x_temporal_input, x_temporal_input)  # (B * N, T, C)
+
+        # Reshape x_temporal back to (B, N, T, C)
+        x_temporal = x_temporal.view(B, N, T, C).permute(0, 2, 1, 3)  # (B, T, N, C)
+        x_temporal = self.norm2_temporal(x_temporal)
+
+        # Step 3: Fuse spatial and temporal embeddings
+        # Concatenate spatial and temporal embeddings along the feature dimension
+        fused_features = torch.cat([x_spatial_fused, x_temporal], dim=-1)  # (B, T, N, 2*C)
+
+        # Project fused features back to the original dimension C
+        fused_features = self.proj(fused_features)  # (B, T, N, C)
+        fused_features = self.proj_drop(fused_features)
+        fused_features, _ = fused_features.max(dim=1)  # (B, N, C)
+
+        # Output the fused feature representation
+        return fused_features
+
+
+class PCTransformerDe(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        encoder_config = config.encoder_config
+        decoder_config = config.decoder_config
+
+        self.num_query = query_num = config.num_query
+        global_feature_dim = config.global_feature_dim
+
+        print_log(f'Transformer with config {config}', logger='MODEL')
+
+        self.increase_dim = nn.Sequential(
+            nn.Linear(encoder_config.embed_dim, 1024),
+            nn.GELU(),
+            nn.Linear(1024, global_feature_dim))
+        # query generator
+        self.coarse_pred = nn.Sequential(
+            nn.Linear(global_feature_dim, 1024),
+            nn.GELU(),
+            nn.Linear(1024, 3 * query_num)
+        )
+        self.mlp_query = nn.Sequential(
+            nn.Linear(global_feature_dim + 3, 1024),
+            nn.GELU(),
+            nn.Linear(1024, 1024),
+            nn.GELU(),
+            nn.Linear(1024, decoder_config.embed_dim)
+        )
+        if decoder_config.embed_dim == encoder_config.embed_dim:
+            self.mem_link = nn.Identity()
+        else:
+            self.mem_link = nn.Linear(encoder_config.embed_dim, decoder_config.embed_dim)
+        # Coarse Level 2 : Decoder
+        self.decoder = PointTransformerDecoderEntry(decoder_config)
+
+        self.query_ranking = nn.Sequential(
+            nn.Linear(3, 256),
+            nn.GELU(),
+            nn.Linear(256, 256),
+            nn.GELU(),
+            nn.Linear(256, 1),
+            nn.Softmax(dim=1)
+        )
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward(self, xyz, coor, x):
+        # x(B, 64, 384)
+        global_feature = self.increase_dim(x)  # B N 1024
+        global_feature = torch.max(global_feature, dim=1)[0]  # B 1024
+
+        coarse_p = self.coarse_pred(global_feature).reshape(x.size(0), -1, 3)  # B 512 3
+
+        coarse = torch.cat([coarse_p, coor], dim=1)  # B 512+64 3 #
+
+        mem = self.mem_link(x)
+        # query selection
+        query_ranking = self.query_ranking(coarse)  # B 512+64 1
+
+        idx = torch.argsort(query_ranking, dim=1, descending=True)  # B 512+64 1
+
+        coarse = torch.gather(coarse, 1, idx[:, :self.num_query].expand(-1, -1, coarse.size(-1)))  #
+
+        if self.training:
+            # add denoise task
+            # first pick some point : 64?
+            picked_points = misc.fps(xyz, 64)
+            picked_points = misc.jitter_points(picked_points)
+            coarse = torch.cat([coarse, picked_points], dim=1)  # B 256+64 3?
+            denoise_length = 64
+
+            # produce query
+            q = self.mlp_query(
+                torch.cat([
+                    global_feature.unsqueeze(1).expand(-1, coarse.size(1), -1),
+                    coarse], dim=-1))  # b n c
+
+            # forward decoder
+            q = self.decoder(q=q, v=mem, q_pos=coarse, v_pos=coor, denoise_length=denoise_length)
+
+            return q, coarse, denoise_length
+
+        else:
+            # produce query
+            q = self.mlp_query(
+                torch.cat([
+                    global_feature.unsqueeze(1).expand(-1, coarse.size(1), -1),
+                    coarse], dim=-1))  # b n c
+
+            # forward decoder
+            q = self.decoder(q=q, v=mem, q_pos=coarse, v_pos=coor)
+
+            return q, coarse, 0
+
+
+class PCTransformerBase(nn.Module):
+    def __init__(self, config):
+        super(PCTransformerBase, self).__init__()
+        self.num_point_clouds = config.num_point_clouds
+        self.dim = config.encoder_config.embed_dim+3
+
+        # Initialize a single shared encoder, attention, and decoder
+        self.encoder = PCTransformerEn(config)  # Single shared encoder instance
+        # self.attention = PCAttention(dim=self.dim*self.num_point_clouds, num_point_clouds=self.num_point_clouds)
+        self.attention = SpatialTemporalAttention(config)
+        self.decoder = PCTransformerDe(config)
+
+    def forward(self, point_clouds):
+        """
+        Args:
+            point_clouds: List of tensors [(B, N1, 3), (B, N2, 3), ...] for each point cloud (B: batch size, N: points).
+
+        Returns:
+            Final output after encoder, attention, and decoder.
+        """
+        encoder_x = []
+        encoder_coor = []
+
+        # Apply shared encoder to each point cloud
+        for i in range(self.num_point_clouds):
+            out_coor, out_x = self.encoder(point_clouds[i])
+            encoder_coor.append(out_coor)
+            encoder_x.append(out_x)
+
+        # Concatenate the encoder outputs (features) along the point cloud dimension
+        # x = torch.cat(encoder_outputs, dim=-1)
+        coor = torch.stack(encoder_coor, dim=1)  # (B, T, N, 3)
+        # coor, _ = torch.max(coor, dim=1)
+        x = torch.stack(encoder_x, dim=1)  # (B, T, N, C)
+
+        # Apply attention to the concatenated coordinates and features
+        updated_x = self.attention(coor, x)
+        updated_coor, _ = torch.max(coor, dim=1)
+
+        # Apply decoder to the attention output
+        q, coarse, denoise_length = self.decoder(xyz=point_clouds[0], coor=updated_coor,
+                                                 x=updated_x)
+
+        return q, coarse, denoise_length
 
 ######################################## PoinTr ########################################  
 
@@ -965,7 +1293,7 @@ class AdaPoinTr(nn.Module):
         assert self.decoder_type in ['fold', 'fc'], f'unexpected decoder_type {self.decoder_type}'
 
         self.fold_step = 8
-        self.base_model = PCTransformer(config)
+        self.base_model = PCTransformerBase(config)
         
         if self.decoder_type == 'fold':
             self.factor = self.fold_step**2
@@ -1020,7 +1348,7 @@ class AdaPoinTr(nn.Module):
         # print(q.size(), coarse_point_cloud.size(), denoise_length)
         # torch.Size([16, 576, 384]), torch.Size([16, 576, 3]), 64
         # torch.Size([16, 576, 384]) torch.Size([16, 576, 3]) 64
-        B, M ,C = q.shape
+        B, M ,C = q.shape  # C = num_query or num_query + denoise_length
 
         global_feature = self.increase_dim(q.transpose(1,2)).transpose(1,2) # B M 1024
         global_feature = torch.max(global_feature, dim=1)[0] # B 1024
@@ -1028,7 +1356,7 @@ class AdaPoinTr(nn.Module):
         rebuild_feature = torch.cat([
             global_feature.unsqueeze(-2).expand(-1, M, -1),
             q,
-            coarse_point_cloud], dim=-1)  # B M 1027 + C
+            coarse_point_cloud], dim=-1)  # B M 1024 + C + 3
 
         # print(f'rebuild_feature.shape: {rebuild_feature.shape}')  # torch.Size([16, 576, 1411])
         # NOTE: foldingNet
