@@ -80,7 +80,29 @@ model : {
       self_attn_combine_style: 'concat',
       cross_attn_block_style_list: ['attn-graph', 'attn', 'attn', 'attn', 'attn', 'attn', 'attn', 'attn'], 
       cross_attn_combine_style: 'concat',
-    }
+    },
+    temporal_config: {
+      embed_dim: 384,
+      depth: 2,
+      num_heads: 6,
+      k: 8,
+      n_group: 2,
+      mlp_ratio: 2.,
+      self_attn_block_style_list: ['attn', 'attn'],
+      self_attn_combine_style: 'concat',
+      cross_attn_block_style_list: ['attn', 'attn'],
+      cross_attn_combine_style: 'concat',
+    },
+    q2q_config: {
+      embed_dim: 384,
+      depth: 1,
+      num_heads: 6,
+      k: 8,
+      n_group: 2,
+      mlp_ratio: 2.,
+      block_style_list: [ 'attn'],
+      combine_style: 'concat',
+    },
 }
   
 total_bs : 16 #16  #4
