@@ -18,7 +18,7 @@ scheduler: {
   kwargs: {
     t_max: 100,               # This corresponds to t_initial in the scheduler
     min_lr: 0.000001,            # This corresponds to lr_min in the scheduler
-    initial_epochs: 4,       # This corresponds to warmup_t in the scheduler  #10
+    initial_epochs: 0,       # This corresponds to warmup_t in the scheduler  #10
     warmup_lr_init: 0.00001,
     t_in_epochs: True
 }}

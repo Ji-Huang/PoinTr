@@ -1087,7 +1087,7 @@ class SpatialTemporalAttention(nn.Module):
            B = batch size, T = number of temporal views, N = number of points per cloud, C = embedding dimension.
         """
         B, T, N, C = x.shape
-        point_query = self.query_emb.weight.unsqueeze(0).repeat(B, 1, 1)
+        # point_query = self.query_emb.weight.unsqueeze(0).repeat(B, 1, 1)
 
         for t in range(T):  # Process each time step separately for spatial attention
             x_t = x[:, t, :, :]  # (B, N, C) for time step t
@@ -1096,7 +1096,10 @@ class SpatialTemporalAttention(nn.Module):
             # Apply spatial self attention
             x_spatial = self.spatial_attention(x_t, coor_t)  # (B, N, C)
             # Apply temporal cross attention
-            point_query = self.temporal_attention(point_query, x_spatial, coor_t, coor_t)  # (B, N, C) # coor_t is place holder
+            if t == 0:
+                point_query = self.temporal_attention(x_spatial, x_spatial, coor_t, coor_t)
+            else:
+                point_query = self.temporal_attention(point_query, x_spatial, coor_t, coor_t)  # (B, N, C) # coor_t is place holder
             # Apply self attention
             point_query = self.q2q(point_query, coor_t)  # coor_t is place holder
 
