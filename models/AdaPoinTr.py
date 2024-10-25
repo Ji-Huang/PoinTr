@@ -951,7 +951,6 @@ class PCTransformerEn(nn.Module):
 
         in_chans = 3 * self.center_num[-1] + 3
 
-        print_log(f'Transformer with config {config}', logger='MODEL')
         # base encoder
         if self.encoder_type == 'graph':
             self.grouper = DGCNN_Grouper(k=16)
@@ -993,96 +992,26 @@ class PCTransformerEn(nn.Module):
         return coor, x
 
 
-class PCAttention(nn.Module):
-    def __init__(self, dim, num_point_clouds, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., drop_path=0.):
-        super().__init__()
-        # Set num_heads equal to num_point_clouds
-        self.num_heads = num_point_clouds
-        head_dim = dim // self.num_heads  # Each head's dimensionality
-        self.scale = qk_scale or head_dim ** -0.5  # Scaling factor for attention
-
-        # Multi-head QKV projection (where each head corresponds to a point cloud)
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-
-        # Dropout layers
-        self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, head_dim)
-        self.proj_drop = nn.Dropout(proj_drop)
-
-        # Use DropPath from timm for stochastic depth regularization
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-
-        # Layer normalization
-        self.norm1 = nn.LayerNorm(dim)
-        self.norm2 = nn.LayerNorm(head_dim)
-
-        # Feedforward network after attention
-        self.mlp = nn.Sequential(
-            nn.Linear(head_dim, 4 * head_dim),  # Expand dimensions in the FFN
-            nn.GELU(),
-            nn.Linear(4 * head_dim, head_dim),  # Project back to the original dimension
-            nn.Dropout(proj_drop)
-        )
-
-    def forward(self, x, mask=None):
-        B, N, C = x.shape
-
-        # Pre-layer normalization
-        x = self.norm1(x)
-
-        # Compute QKV, where each head processes one point cloud
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]   # Separate into query, key, value tensors
-
-        # Scaled dot-product attention
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-
-        # Apply mask (if provided)
-        if mask is not None:
-            mask_value = -torch.finfo(attn.dtype).max
-            attn = attn.masked_fill(mask, mask_value)
-
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        # Attention-weighted sum of values
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
-
-        # Residual connection and dropout
-        x = self.drop_path(x)
-
-        # Layer normalization and feedforward network
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
-
-        coor = x[:, :, :3]  # (B, 64, 3)
-        updated_x = x[:, :, 3:]  # (B, 64, 384)
-
-        return [coor, updated_x]
-
-
 class SpatialTemporalAttention(nn.Module):
     def __init__(self, config, qkv_bias=False, attn_drop=0., proj_drop=0.):
         super(SpatialTemporalAttention, self).__init__()
 
         spatial_config = config.spatial_config
+        temporal_config = config.temporal_config
         encoder_config = config.encoder_config
         dim = encoder_config.embed_dim
         # Define spatial attention (intra-cloud)
         self.spatial_attention = PointTransformerEncoderEntry(spatial_config)
 
         # Define temporal attention (inter-cloud)
-        self.temporal_attention = nn.MultiheadAttention(embed_dim=dim, num_heads=encoder_config.num_heads, bias=qkv_bias,
-                                                        dropout=attn_drop)
+        self.temporal_attention = PointTransformerEncoderEntry(temporal_config)
 
         # Norm layers for spatial and temporal attention
         self.norm1_spatial = nn.LayerNorm(dim)
         self.norm2_temporal = nn.LayerNorm(dim)
 
         # Projection layer to fuse spatial and temporal embeddings
-        self.proj = nn.Linear(dim * 2, dim)  # Fuse spatial and temporal embeddings
-        self.proj_drop = nn.Dropout(proj_drop)
+        self.proj = Mlp(in_features=dim*2, hidden_features=dim, out_features=dim)
 
     def forward(self, coor, x):
         """
@@ -1109,9 +1038,10 @@ class SpatialTemporalAttention(nn.Module):
         # Step 2: Temporal Attention across different point clouds
         # Reshape x_spatial_fused to (B * N, T, C) for temporal attention
         x_temporal_input = x_spatial_fused.permute(0, 2, 1, 3).reshape(B * N, T, C)
+        coor_temporal_input = coor.permute(0, 2, 1, 3).reshape(B * N, T, 3)  # place holder
 
         # Apply temporal attention
-        x_temporal, _ = self.temporal_attention(x_temporal_input, x_temporal_input, x_temporal_input)  # (B * N, T, C)
+        x_temporal = self.temporal_attention(x_temporal_input, coor_temporal_input)  # (B * N, T, C)
 
         # Reshape x_temporal back to (B, N, T, C)
         x_temporal = x_temporal.view(B, N, T, C).permute(0, 2, 1, 3)  # (B, T, N, C)
@@ -1123,7 +1053,6 @@ class SpatialTemporalAttention(nn.Module):
 
         # Project fused features back to the original dimension C
         fused_features = self.proj(fused_features)  # (B, T, N, C)
-        fused_features = self.proj_drop(fused_features)
         fused_features, _ = fused_features.max(dim=1)  # (B, N, C)
 
         # Output the fused feature representation
@@ -1138,8 +1067,6 @@ class PCTransformerDe(nn.Module):
 
         self.num_query = query_num = config.num_query
         global_feature_dim = config.global_feature_dim
-
-        print_log(f'Transformer with config {config}', logger='MODEL')
 
         self.increase_dim = nn.Sequential(
             nn.Linear(encoder_config.embed_dim, 1024),
@@ -1240,6 +1167,8 @@ class PCTransformerBase(nn.Module):
         self.num_point_clouds = config.num_point_clouds
         self.dim = config.encoder_config.embed_dim+3
 
+        print_log(f'Transformer with config {config}', logger='MODEL')
+
         # Initialize a single shared encoder, attention, and decoder
         self.encoder = PCTransformerEn(config)  # Single shared encoder instance
         # self.attention = PCAttention(dim=self.dim*self.num_point_clouds, num_point_clouds=self.num_point_clouds)
@@ -1271,10 +1200,16 @@ class PCTransformerBase(nn.Module):
 
         # Apply attention to the concatenated coordinates and features
         updated_x = self.attention(coor, x)
-        updated_coor, _ = torch.max(coor, dim=1)
+
+        B, T, N, _ = coor.shape
+        coor = coor.view(B, T*N, 3)
+        coor = coor.transpose(1, 2).contiguous()
+        fps_idx = pointnet2_utils.furthest_point_sample(coor, N)
+        updated_coor = pointnet2_utils.gather_operation(coor, fps_idx)
+        updated_coor = updated_coor.transpose(1, 2).contiguous()
 
         # Apply decoder to the attention output
-        q, coarse, denoise_length = self.decoder(xyz=point_clouds[0], coor=updated_coor,
+        q, coarse, denoise_length = self.decoder(xyz=point_clouds[-1], coor=updated_coor,
                                                  x=updated_x)
 
         return q, coarse, denoise_length

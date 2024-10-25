@@ -6,10 +6,9 @@ tensorboard --logdir=./
 cd D:\ji\pointr
 conda activate ji_o3d
 
-python scripts/train.py 0 --config ./cfgs/PCN_models/AdaPoinTr.yaml --exp_name example_ShapeNet_Car
+python scripts/train.py 0 --config ./cfgs/PCN_models/AdaPoinTr.yaml --exp_name PCA_
 
-Start-Job -ScriptBlock { Set-Location -Path 'D:\Ji\PoinTr'; & "C:\Users\TUM_LfK\Anaconda3\Scripts\activate" ji_o3d; python scripts/train.py 0 --config ./cfgs/PCN_models/AdaPoinTr.yaml --exp_name example_aug_CosLRn}
-Start-Job -ScriptBlock { Set-Location -Path 'D:\Ji\PoinTr'; python scripts/train.py 0 --config ./cfgs/PCN_models/AdaPoinTr.yaml --exp_name ShapeNet_Car_04_rws}
+Start-Job -ScriptBlock { Set-Location -Path 'D:\Ji\PoinTr'; python scripts/train.py 0 --config ./cfgs/PCN_models/AdaPoinTr.yaml --exp_name PCA_}
 
 python tools/inference.py cfgs/PCN_models/AdaPoinTr.yaml experiments/AdaPoinTr/PCN_models/example/ckpt-best.pth --pc_root demo/ --out_pc_root inference_result/
 python tools/inference.py cfgs/PCN_models/AdaPoinTr.yaml experiments/AdaPoinTr/PCN_models/PCA_00/ckpt-best.pth --pc_root data\ShapeNet_Car_Seq\ --out_pc_root inference_result_PCA_00/
