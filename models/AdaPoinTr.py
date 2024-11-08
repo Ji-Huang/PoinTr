@@ -328,7 +328,7 @@ class TransformerEncoder(nn.Module):
             ))
 
     def forward(self, x, pos):
-        idx = idx = knn_point(self.k, pos, pos)
+        idx = knn_point(self.k, pos, pos)
         for _, block in enumerate(self.blocks):
             x = block(x, pos, idx=idx) 
         return x
@@ -1006,6 +1006,10 @@ class SpatialTemporalAttention(nn.Module):
         # Define temporal attention (inter-cloud)
         self.temporal_attention = PointTransformerEncoderEntry(temporal_config)
 
+        self.coor_emb = Mlp(3, dim, dim)
+        self.combined_emb = Mlp(387, dim, dim)
+        self.coor_q = Mlp(dim, dim, 3)
+
         # Norm layers for spatial and temporal attention
         self.norm1_spatial = nn.LayerNorm(dim)
         self.norm2_temporal = nn.LayerNorm(dim)
@@ -1015,7 +1019,7 @@ class SpatialTemporalAttention(nn.Module):
 
     def forward(self, coor, x):
         """
-        coor: (B, N, 3) -> Coordinates of the center points.
+        coor: (B, T, N, 3) -> Coordinates of the center points.
         x: (B, T, N, C) -> Embeddings of the point clouds.
            B = batch size, T = number of temporal views, N = number of points per cloud, C = embedding dimension.
         """
@@ -1037,14 +1041,21 @@ class SpatialTemporalAttention(nn.Module):
 
         # Step 2: Temporal Attention across different point clouds
         # Reshape x_spatial_fused to (B * N, T, C) for temporal attention
-        x_temporal_input = x_spatial_fused.permute(0, 2, 1, 3).reshape(B * N, T, C)
-        coor_temporal_input = coor.permute(0, 2, 1, 3).reshape(B * N, T, 3)  # place holder
+        # x_temporal_input = x_spatial_fused.permute(0, 2, 1, 3).reshape(B * N, T, C)
+        # coor_temporal_input = coor.permute(0, 2, 1, 3).reshape(B * N, T, 3)  # place holder
+        x_temporal_input = x_spatial_fused.reshape(B, T * N, C)
+        coor_temporal_input = coor.reshape(B, T * N, 3)  # place holder
+        combined_temporal_input = torch.cat([x_temporal_input, coor_temporal_input], dim=-1)
 
+        coor_t_input = self.coor_emb(coor_temporal_input)
+        combined_t_input = self.combined_emb(combined_temporal_input)
         # Apply temporal attention
-        x_temporal = self.temporal_attention(x_temporal_input, coor_temporal_input)  # (B * N, T, C)
+        coor_temporal = self.temporal_attention(coor_t_input, coor_temporal_input)  # (B, T*N, C)
+        x_temporal = self.temporal_attention(combined_t_input, coor_temporal_input)  # (B, T*N, C)
 
         # Reshape x_temporal back to (B, N, T, C)
-        x_temporal = x_temporal.view(B, N, T, C).permute(0, 2, 1, 3)  # (B, T, N, C)
+        # x_temporal = x_temporal.view(B, N, T, C).permute(0, 2, 1, 3)  # (B, T, N, C)
+        x_temporal = x_temporal.view(B, T, N, C)
         x_temporal = self.norm2_temporal(x_temporal)
 
         # Step 3: Fuse spatial and temporal embeddings
@@ -1055,8 +1066,11 @@ class SpatialTemporalAttention(nn.Module):
         fused_features = self.proj(fused_features)  # (B, T, N, C)
         fused_features, _ = fused_features.max(dim=1)  # (B, N, C)
 
+        fused_coor = self.coor_q(coor_temporal.view(B, T, N, C))  # (B, T, N, 3)
+        fused_coor = fused_coor.mean(dim=1)  # (B, N, 3)
+
         # Output the fused feature representation
-        return fused_features
+        return fused_features, fused_coor
 
 
 class PCTransformerDe(nn.Module):
@@ -1199,14 +1213,14 @@ class PCTransformerBase(nn.Module):
         x = torch.stack(encoder_x, dim=1)  # (B, T, N, C)
 
         # Apply attention to the concatenated coordinates and features
-        updated_x = self.attention(coor, x)
+        updated_x, updated_coor = self.attention(coor, x)
 
-        B, T, N, _ = coor.shape
-        coor = coor.view(B, T*N, 3)
-        coor = coor.transpose(1, 2).contiguous()
-        fps_idx = pointnet2_utils.furthest_point_sample(coor, N)
-        updated_coor = pointnet2_utils.gather_operation(coor, fps_idx)
-        updated_coor = updated_coor.transpose(1, 2).contiguous()
+        # B, T, N, _ = coor.shape
+        # coor = coor.view(B, T*N, 3)
+        # coor = coor.transpose(1, 2).contiguous()
+        # fps_idx = pointnet2_utils.furthest_point_sample(coor, N)
+        # updated_coor = pointnet2_utils.gather_operation(coor, fps_idx)
+        # updated_coor = updated_coor.transpose(1, 2).contiguous()
 
         # Apply decoder to the attention output
         q, coarse, denoise_length = self.decoder(xyz=point_clouds[-1], coor=updated_coor,

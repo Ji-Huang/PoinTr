@@ -143,7 +143,7 @@ def inference_multiple(model, pc_path, args, root=None):
         # List all files in the directory to count available partial files
         available_files = sorted([f for f in os.listdir(partial_path) if f.endswith('.pcd')])
 
-        window_size = 9
+        window_size = 13
         half_window = window_size // 2
 
         # # Iterate through each file

@@ -163,3 +163,11 @@ class Metrics(object):
         _value = self._values[_index]
         other_value = other._values[_index]
         return _value > other_value if _metric['is_greater_better'] else _value < other_value
+
+    @classmethod
+    def get_emd(cls, pred, gt, eps=0.005, iterations=100):
+        """Compute only the EMD distance"""
+        emd_loss = cls.ITEMS[3]['eval_object']
+        dist, _ = emd_loss(pred, gt, eps, iterations)
+        emd_out = torch.mean(torch.sqrt(dist))
+        return emd_out * 1000

@@ -488,7 +488,8 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
     test_losses = AverageMeter(['SparseLossL1', 'SparseLossL2', 'DenseLossL1', 'DenseLossL2'])
     test_metrics = AverageMeter(Metrics.names())
     category_metrics = dict()
-    n_samples = len(test_dataloader) # bs is 1
+    n_samples = len(test_dataloader)  # bs is 1
+    window_size = config.model.num_point_clouds
 
     with torch.no_grad():
         for idx, (taxonomy_ids, data) in enumerate(test_dataloader):
@@ -503,7 +504,8 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
             total_sparse_loss_l2 = 0
             total_dense_loss_l1 = 0
             total_dense_loss_l2 = 0
-            view_count = 1  # Default is 1 view if dataset is not ShapeNet_Car_Seq
+            # total_emd_loss = 0
+            # view_count = 1  # Default is 1 view if dataset is not ShapeNet_Car_Seq
 
             if dataset_name == 'ShapeNet_Car_Seq':
                 # partial = data[0][random.randint(0, 14)].cuda()   
@@ -533,16 +535,36 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
                 #     aggregated_pcds.append(combined_pcd)
                 #
                 # view_count = len(aggregated_pcds)  #
+                half_window = window_size // 2
+                # Initialize total_metrics to accumulate metrics across views
+                total_metrics = [0.0] * len(Metrics.names())
+
+                # Main loop through files, avoiding boundaries based on window size
+                for i in range(half_window + 1, view_count - half_window - 1):
+                    # Temporary list to gather partials within the current window
+                    window_partials = []
+
+                    # Loop through the window size to gather partials from (idx - half_window) to (idx + half_window)
+                    for offset in range(-half_window, half_window + 1):
+                        current_idx = i + offset
+
+                        # Ensure the index is within valid bounds
+                        if 0 <= current_idx < view_count:
+                            # Here, replace `partial_data` with the appropriate data retrieval based on `available_files[current_idx]`
+                            # For example, you might read the file or process it in some way to get `partial_data`.
+                            partial_data = partial_views[current_idx]  # Replace with actual data retrieval logic
+                            window_partials.append(partial_data)
+
+                    cuda_window_partials = [window_partial.cuda() for window_partial in window_partials]
 
                 # Iterate over each partial view
-                
-                for partial_view in partial_views:
-                    partial = partial_view.cuda()
+                # for partial_view in partial_views:
+                #     partial = partial_view.cuda()
                 # for partial_view in aggregated_pcds:
                 #     partial = partial_view.cuda()
 
                     # Forward pass
-                    ret = base_model(partial)
+                    ret = base_model(cuda_window_partials)
                     coarse_points = ret[0]
                     dense_points = ret[-1]
 
@@ -551,34 +573,47 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
                     total_sparse_loss_l2 += ChamferDisL2(coarse_points, gt)
                     total_dense_loss_l1 += ChamferDisL1(dense_points, gt)
                     total_dense_loss_l2 += ChamferDisL2(dense_points, gt)
+                    # total_emd_loss += Metrics.get_emd(dense_points, gt)
 
+                    _metrics = Metrics.get(dense_points, gt, require_emd=False)
+                    _metrics = [m.item() for m in _metrics]
+                    # Accumulate metrics
+                    for j, metric in enumerate(_metrics):
+                        total_metrics[j] += metric
+
+                num_windows = view_count - 2*half_window - 1
                 # Average the losses over the number of views
-                avg_sparse_loss_l1 = total_sparse_loss_l1 / view_count
-                avg_sparse_loss_l2 = total_sparse_loss_l2 / view_count
-                avg_dense_loss_l1 = total_dense_loss_l1 / view_count
-                avg_dense_loss_l2 = total_dense_loss_l2 / view_count
+                avg_sparse_loss_l1 = total_sparse_loss_l1 / num_windows
+                avg_sparse_loss_l2 = total_sparse_loss_l2 / num_windows
+                avg_dense_loss_l1 = total_dense_loss_l1 / num_windows
+                avg_dense_loss_l2 = total_dense_loss_l2 / num_windows
+                # avg_emd_loss = total_emd_loss / num_windows
 
-                test_losses.update([avg_sparse_loss_l1.item() * 1000, avg_sparse_loss_l2.item() * 1000, avg_dense_loss_l1.item() * 1000, avg_dense_loss_l2.item() * 1000])
+                avg_metrics = [total_metric / num_windows for total_metric in total_metrics]
 
-                _metrics = Metrics.get(dense_points, gt, require_emd=True)
+                test_losses.update([avg_sparse_loss_l1.item() * 1000,
+                                    avg_sparse_loss_l2.item() * 1000,
+                                    avg_dense_loss_l1.item() * 1000,
+                                    avg_dense_loss_l2.item() * 1000])
+
                 # test_metrics.update(_metrics)
 
-                if taxonomy_id not in category_metrics:
-                    category_metrics[taxonomy_id] = AverageMeter(Metrics.names())
-                category_metrics[taxonomy_id].update(_metrics)
+                for _taxonomy_id in taxonomy_ids:
+                    if _taxonomy_id not in category_metrics:
+                        category_metrics[_taxonomy_id] = AverageMeter(Metrics.names())
+                    category_metrics[_taxonomy_id].update(avg_metrics)
             else:
                 raise NotImplementedError(f'Train phase do not support {dataset_name}')
 
 
-            if (idx+1) % 200 == 0:
-                # print_log('Test[%d/%d] Taxonomy = %s Sample = %s Losses = %s Metrics = %s' %
-                #             (idx + 1, n_samples, taxonomy_id, model_id, ['%.4f' % l for l in test_losses.val()], 
-                #             ['%.4f' % m for m in _metrics]), logger=logger)
-                print_log(f'Test[{idx + 1}/{n_samples}] Taxonomy = {taxonomy_id}, '
-                          f'Losses = {["%.4f" % l for l in test_losses.val()]}, '
-                          f'Metrics = {["%.4f" % m for m in _metrics]}', logger=logger)
+            # print_log('Test[%d/%d] Taxonomy = %s Sample = %s Losses = %s Metrics = %s' %
+            #             (idx + 1, n_samples, taxonomy_id, model_id, ['%.4f' % l for l in test_losses.val()],
+            #             ['%.4f' % m for m in _metrics]), logger=logger)
+            print_log(f'Test[{idx + 1}/{n_samples}] Taxonomy = {taxonomy_id}, '
+                      f'Losses = {["%.4f" % l for l in test_losses.val()]}, '
+                      f'Metrics = {["%.4f" % m for m in avg_metrics]}', logger=logger)
                 
-        for _,v in category_metrics.items():
+        for _, v in category_metrics.items():
             test_metrics.update(v.avg())
         print_log('[TEST] Metrics = %s' % (['%.4f' % m for m in test_metrics.avg()]), logger=logger)
      

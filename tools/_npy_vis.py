@@ -4,7 +4,7 @@ import os
 
 
 pcd_dir = '../inference_result_PCA_00'
-pcd_dir2 = '../inference_result_PCA_01o'
+pcd_dir2 = '../inference_result_PCA_02o'
 
 pcd_list = []
 pcd5_list = []
@@ -13,7 +13,7 @@ for file in sorted(os.listdir(pcd_dir)):
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
     pcd.paint_uniform_color([0, 0, 1])
-    # pcd.translate([-0.5, 0, 0])
+    pcd.translate([-0.5, 0, 0])
 
     points6 = np.load(os.path.join(pcd_dir, file, 'gt.npy'))
     pcd6 = o3d.geometry.PointCloud()
@@ -45,7 +45,7 @@ for file in sorted(os.listdir(pcd_dir)):
     pcd5 = o3d.geometry.PointCloud()
     pcd5.points = o3d.utility.Vector3dVector(points5)
     pcd5.paint_uniform_color([1, 0, 0])
-    # pcd5.translate([0.5, 0, 0])
+    pcd5.translate([0.5, 0, 0])
 
     # Step 1: Compute distances from each point in pcd to its nearest neighbor in pcd6
     distances = np.asarray(pcd5.compute_point_cloud_distance(pcd6))
@@ -79,7 +79,7 @@ for file in sorted(os.listdir(pcd_dir)):
     # pcd4.translate([0.5, 0, 0])
 
     # pcd.paint_uniform_color([0, 0, 1])
-    #o3d.visualization.draw_geometries([pcd_filtered, pcd5_filtered])
+    o3d.visualization.draw_geometries([pcd, pcd5, pcd6])
 
-print(np.mean(pcd_list))
-print(np.mean(pcd5_list))
+# print(np.mean(pcd_list))
+# print(np.mean(pcd5_list))
