@@ -823,12 +823,12 @@ class PCTransformer(nn.Module):
             self.grouper = DGCNN_Grouper(k=16)
         else:
             self.grouper = SimpleEncoder(k=32, embed_dims=512)
-        self.pos_embed = nn.Sequential(
-            nn.Linear(3, 128),
-            nn.GELU(),
-            nn.Linear(128, encoder_config.embed_dim)
-        )
-        # self.pos_embed = RelativePositionalEmbedding(in_chans=in_chans, embed_dim=encoder_config.embed_dim)
+        # self.pos_embed = nn.Sequential(
+        #     nn.Linear(3, 128),
+        #     nn.GELU(),
+        #     nn.Linear(128, encoder_config.embed_dim)
+        # )
+        self.pos_embed = RelativePositionalEmbedding(in_chans=195, embed_dim=encoder_config.embed_dim)
         self.input_proj = nn.Sequential(
             nn.Linear(self.grouper.num_features, 512),
             nn.GELU(),
@@ -868,7 +868,7 @@ class PCTransformer(nn.Module):
             nn.Linear(256, 256),
             nn.GELU(),
             nn.Linear(256, 1),
-            nn.Sigmoid()  # nn.Softmax(dim=1)
+            nn.Softmax(dim=1)
         )
 
         self.apply(self._init_weights)
@@ -897,9 +897,9 @@ class PCTransformer(nn.Module):
 
         coarse_p = self.coarse_pred(global_feature).reshape(bs, -1, 3) # B 512 3
 
-        coarse_inp = misc.fps(xyz, 64)  # B 256 3
+        # coarse_inp = misc.fps(xyz, 64)  # B 256 3
 
-        coarse = torch.cat([coarse_p, coarse_inp], dim=1) # B 512+64 3? #
+        coarse = torch.cat([coarse_p, coor], dim=1) # B 512+64 3? #
 
         mem = self.mem_link(x)
 
