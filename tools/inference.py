@@ -179,6 +179,63 @@ def inference_multiple(model, pc_path, args, root=None):
 
     return
 
+
+def inference_ld(model, pc_path, args, root=None):
+    transform = Compose([{
+        'callback': 'UpSamplePoints',
+        'parameters': {
+            'n_points': 256  #2048
+        },
+        'objects': ['input']
+    }, {
+        'callback': 'ToTensor',
+        'objects': ['input']
+    }])
+
+    available_files = sorted([f for f in os.listdir(pc_path) if f.endswith('.pcd')])
+    view_count = len(available_files)
+
+    window_size = 9
+    half_window = window_size // 2
+
+    # Main loop through files, avoiding boundaries based on window size
+    for i in range(half_window + 1, view_count - half_window - 1):
+        # Temporary list to gather partials within the current window
+        window_partials = []
+
+        # Loop through the window size to gather partials from (idx - half_window) to (idx + half_window)
+        for offset in range(-half_window, half_window + 1):
+            current_idx = i + offset
+
+            # Ensure the index is within valid bounds
+            if 0 <= current_idx < view_count:
+                # Here, replace `partial_data` with the appropriate data retrieval based on `available_files[current_idx]`
+                # For example, you might read the file or process it in some way to get `partial_data`.
+                partial = IO.get(os.path.join(pc_path, f'Car_5_{current_idx:06}.pcd')).astype(np.float32)
+                partial_data = {'input': partial}
+                partial_data = transform(partial_data)
+                # Append the concatenated result to the list
+                window_partials.append(partial_data['input'].unsqueeze(0))
+
+        cuda_window_partials = [window_partial.cuda() for window_partial in window_partials]
+
+        # ret = model(partials_data.to(args.device.lower()))
+        # cuda_partials = [partial.to(args.device.lower()) for partial in partials_data]
+        ret = model(cuda_window_partials)
+
+        dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
+        coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
+
+        if args.out_pc_root != '':
+            target_path = os.path.join(args.out_pc_root, "lidar")
+            os.makedirs(target_path, exist_ok=True)
+
+            np.save(os.path.join(target_path, f'Car_5_{i:06}.npy'), dense_points)
+            # np.save(os.path.join(target_path, 'coarse.npy'), coarse_points)
+
+    return
+
+
 def main():
     args = get_args()
 

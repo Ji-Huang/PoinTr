@@ -4,7 +4,7 @@ import os
 
 
 pcd_dir = '../inference_result_PCA_00'
-pcd_dir2 = '../inference_result_PCA_02o'
+pcd_dir2 = '../inference_result_PCA_01o'
 
 pcd_list = []
 pcd5_list = []
