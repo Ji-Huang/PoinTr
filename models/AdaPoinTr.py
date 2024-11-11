@@ -1073,10 +1073,15 @@ class SpatialTemporalAttention(nn.Module):
         # Define spatial attention (intra-cloud self attention)
         self.spatial_attention = PointTransformerEncoderEntry(config.spatial_config)
         # Define temporal attention (inter-cloud cross attention)
-        self.temporal_attention = PointTransformerDecoderEntry(config.temporal_config)
+        self.temporal_attention_coor = PointTransformerDecoderEntry(config.temporal_config)
+        self.temporal_attention_combined = PointTransformerDecoderEntry(config.temporal_config)
 
         self.query_emb = nn.Embedding(num_points, dim)  # [64, 384]
         self.q2q = PointTransformerEncoderEntry(config.q2q_config)
+
+        self.coor_emb = Mlp(3, dim, dim)
+        self.combined_emb = Mlp(dim+3, dim, dim)
+        self.coor_q = Mlp(dim, dim, 3)
 
         self.update_x = Mlp(in_features=dim, hidden_features=dim, out_features=dim)
 
@@ -1087,25 +1092,33 @@ class SpatialTemporalAttention(nn.Module):
            B = batch size, T = number of temporal views, N = number of points per cloud, C = embedding dimension.
         """
         B, T, N, C = x.shape
-        # point_query = self.query_emb.weight.unsqueeze(0).repeat(B, 1, 1)
+        point_query = self.query_emb.weight.unsqueeze(0).repeat(B, 1, 1)
 
         for t in range(T):  # Process each time step separately for spatial attention
             x_t = x[:, t, :, :]  # (B, N, C) for time step t
-            coor_t = coor[:, t, :, :]
+            coor_t = coor[:, t, :, :]  # (B, N, 3) for time step t
 
             # Apply spatial self attention
             x_spatial = self.spatial_attention(x_t, coor_t)  # (B, N, C)
+
+            combined_t = torch.cat([x_spatial, coor_t], dim=-1)  # (B, N, 387) for time step t
+            coor_te = self.coor_emb(coor_t)  # (B, 64, 384)
+            combined_te = self.combined_emb(combined_t)  # (B, 64, 384)
+
             # Apply temporal cross attention
             if t == 0:
-                point_query = self.temporal_attention(x_spatial, x_spatial, coor_t, coor_t)
+                point_query = self.temporal_attention_coor(point_query, coor_te, coor_t, coor_t)
+                point_query = self.temporal_attention_combined(point_query, combined_te, coor_t, coor_t)
             else:
-                point_query = self.temporal_attention(point_query, x_spatial, coor_t, coor_t)  # (B, N, C) # coor_t is place holder
+                point_query = self.temporal_attention_coor(point_query, coor_te, coor_t, coor_t)  # coor_t is place holder
+                point_query = self.temporal_attention_combined(point_query, combined_te, coor_t, coor_t)  # coor_t is place holder
             # Apply self attention
             point_query = self.q2q(point_query, coor_t)  # coor_t is place holder
 
         updated_x = self.update_x(point_query)
+        updated_coor = self.coor_q(point_query)
 
-        return updated_x
+        return updated_x, updated_coor
 
 
 class PCTransformerDe(nn.Module):
@@ -1246,15 +1259,15 @@ class PCTransformerBase(nn.Module):
         x = torch.stack(encoder_x, dim=1)  # (B, T, N, C)
 
         # Apply SpatialTemporalAttention
-        updated_x = self.attention(coor, x)
+        updated_x, updated_coor = self.attention(coor, x)
 
-        # Apply FPS to coor
-        B, T, N, _ = coor.shape
-        coor = coor.view(B, T*N, 3)
-        coor = coor.transpose(1, 2).contiguous()
-        fps_idx = pointnet2_utils.furthest_point_sample(coor, N)
-        updated_coor = pointnet2_utils.gather_operation(coor, fps_idx)
-        updated_coor = updated_coor.transpose(1, 2).contiguous()
+        # # Apply FPS to coor
+        # B, T, N, _ = coor.shape
+        # coor = coor.view(B, T*N, 3)
+        # coor = coor.transpose(1, 2).contiguous()
+        # fps_idx = pointnet2_utils.furthest_point_sample(coor, N)
+        # updated_coor = pointnet2_utils.gather_operation(coor, fps_idx)
+        # updated_coor = updated_coor.transpose(1, 2).contiguous()
 
         # Apply decoder to the attention output
         q, coarse, denoise_length = self.decoder(xyz=point_clouds[-1], coor=updated_coor,
