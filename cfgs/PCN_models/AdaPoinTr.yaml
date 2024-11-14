@@ -59,42 +59,44 @@ model : {
       block_style_list: ['attn-graph', 'attn', 'attn', 'attn', 'attn', 'attn'], 
       combine_style: 'concat',
     },
-    spatial_config: {
-      embed_dim: 384,
-      depth: 2,
-      num_heads: 6,
-      k: 8,
-      n_group: 2,
-      mlp_ratio: 2.,
-      block_style_list: [ 'attn-graph', 'attn'],
-      combine_style: 'concat',
-    },
     temporal_config: {
       embed_dim: 384,
       depth: 2,
       num_heads: 6,
-      k: 8,
+      k: 0,
       n_group: 2,
       mlp_ratio: 2.,
       block_style_list: [ 'attn', 'attn' ],
       combine_style: 'concat',
     },
-    decoder_config: {
+    decoder1_config: {
       embed_dim: 384,
-      depth: 8,
+      depth: 2,
       num_heads: 6,
       k: 8,
       n_group: 2,
       mlp_ratio: 2.,
-      self_attn_block_style_list: ['attn-graph', 'attn', 'attn', 'attn', 'attn', 'attn', 'attn', 'attn'], 
+      self_attn_block_style_list: [ 'attn-graph', 'attn'],
       self_attn_combine_style: 'concat',
-      cross_attn_block_style_list: ['attn-graph', 'attn', 'attn', 'attn', 'attn', 'attn', 'attn', 'attn'], 
+      cross_attn_block_style_list: [ 'attn-graph', 'attn'],
+      cross_attn_combine_style: 'concat',
+    },
+    decoder2_config: {
+      embed_dim: 384,
+      depth: 6,
+      num_heads: 6,
+      k: 0,
+      n_group: 2,
+      mlp_ratio: 2.,
+      self_attn_block_style_list: ['attn', 'attn', 'attn', 'attn', 'attn', 'attn'],
+      self_attn_combine_style: 'concat',
+      cross_attn_block_style_list: ['attn', 'attn', 'attn', 'attn', 'attn', 'attn'],
       cross_attn_combine_style: 'concat',
     }
 }
-  
-total_bs : 16 #16  #4
-step_per_update : 2 #1 #2  #4
+#bs=16, spu=2
+total_bs : 4 #16  #4
+step_per_update : 8 #1 #2  #4
 max_epoch : 100 #600
 
 patience: 20
