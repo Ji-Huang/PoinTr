@@ -45,7 +45,7 @@ model : {
     num_query: 512, #512
     num_points: 16384,
     center_num: [128, 64],  #[512, 256], [128, 64]
-    num_point_clouds: 9,
+    num_point_clouds: 5,
     global_feature_dim: 1024, 
     encoder_type: graph,
     decoder_type: fc,  #fc
