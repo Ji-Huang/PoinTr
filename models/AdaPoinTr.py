@@ -1112,12 +1112,9 @@ class PCTransformerBase(nn.Module):
         # self.attention = PCAttention(dim=self.dim*self.num_point_clouds, num_point_clouds=self.num_point_clouds)
         self.decoder1 = PCTransformerDe1(config)
 
-        temporal_config = config.temporal_config
-        decoder_config = config.decoder2_config
-
-        self.temporal_attention_x = PointTransformerEncoderEntry(temporal_config)
-        self.temporal_attention_q = PointTransformerEncoderEntry(temporal_config)
-        self.decoder2 = PointTransformerDecoderEntry(decoder_config)
+        self.temporal_attention_x = PointTransformerEncoderEntry(config.temporal_config_x)
+        self.temporal_attention_q = PointTransformerDecoderEntry(config.temporal_config_q)
+        self.decoder2 = PointTransformerDecoderEntry(config.decoder2_config)
 
         self.query_ranking2 = nn.Sequential(
             nn.Linear(3, 256),
@@ -1143,39 +1140,51 @@ class PCTransformerBase(nn.Module):
         C = self.dim
         denoise_length = None
         x_combined = None
-        q_combined = None
+        # q_combined = None
         coarse_combined = None
+        updated_q = None
 
         # Apply shared encoder to each point cloud
         for i in range(self.num_point_clouds):
             coor, x = self.encoder(point_clouds[i])
             q, coarse, dl = self.decoder1(point_clouds[i], coor=coor, x=x)
-            if i == 0:
-                # Initialize the combined tensors only once
-                x_combined = x  # (B, N, C)
-                q_combined = q  # (B, M, C)
-                coarse_combined = coarse  # (B, M, 3)
-            else:
-                # Concatenate along the second dimension (across point clouds)
-                x_combined = torch.cat([x_combined, x], dim=1)  # (B, T*N, C)
-                q_combined = torch.cat([q_combined, q], dim=1)  # (B, T*M, C)
-                coarse_combined = torch.cat([coarse_combined, coarse], dim=1)  # (B, T*M, 3)
             # Set denoise_length once, assuming it's consistent across point clouds
             if denoise_length is None:
                 denoise_length = dl
+            if i == 0:
+                # Initialize the combined tensors only once
+                x_combined = x  # (B, N, C)
+                # q_combined = q  # (B, M, C)
+                coarse_combined = coarse  # (B, M, 3)
+                updated_q = self.temporal_attention_q(q, q, None, None, denoise_length=denoise_length)
+            else:
+                # Concatenate along the second dimension (across point clouds)
+                x_combined = torch.cat([x_combined, x], dim=1)  # (B, T*N, C)
+                updated_q = self.temporal_attention_q(updated_q, q, None, None, denoise_length=denoise_length)
+                # q_combined = torch.cat([q_combined, q], dim=1)  # (B, T*M, C)
+                coarse_combined = torch.cat([coarse_combined, coarse], dim=1)  # (B, 2*M, 3)
+
+                query_ranking = self.query_ranking2(coarse_combined)
+                # idx = torch.argsort(query_ranking.squeeze(-1), dim=1, descending=True)
+                if self.training:
+                    num_coarse = self.num_query + denoise_length
+                else:
+                    num_coarse = self.num_query
+                values, idx = torch.topk(query_ranking.squeeze(-1), num_coarse, dim=1, largest=True, sorted=False)
+                coarse_combined = torch.gather(coarse_combined, 1, idx.unsqueeze(-1).expand(-1, -1, 3))
 
         # Apply attention to the concatenated coordinates and features
         updated_x = self.temporal_attention_x(x_combined, None)  # (B, T*N, C)coor_combined
         enriched_x = updated_x.view(B, T, -1, C).mean(dim=1)  # (B, N, C)
         # enriched_x = updated_x.max(dim=1).values  # (B, N, C)
 
-        updated_q = self.temporal_attention_q(q_combined, None)  # (B, T*M, C)coarse_combined
-        enriched_q = updated_q.view(B, T, -1, C).mean(dim=1)  # (B, M, C)
+        # updated_q = self.temporal_attention_q(q_combined, None)  # (B, T*M, C)coarse_combined
+        # enriched_q = updated_q.view(B, T, -1, C).mean(dim=1)  # (B, M, C)
         # enriched_q = updated_q.max(dim=1).values  # (B, M, C)
 
         # q_c = self.decoder2(q=enriched_q, v=enriched_x, q_pos=coarse_combined.view(B, T, -1, 3).mean(dim=1),
         #                    v_pos=coor_combined.view(B, T, -1, 3).mean(dim=1), denoise_length=denoise_length)
-        q_c = self.decoder2(q=enriched_q, v=enriched_x, q_pos=None,
+        q_c = self.decoder2(q=updated_q, v=enriched_x, q_pos=None,
                            v_pos=None, denoise_length=denoise_length)
 
         coarse_combined_flat = coarse_combined.view([coarse_combined.size(0), -1, 3])
@@ -1247,7 +1256,7 @@ class AdaPoinTr(nn.Module):
         idx = knn_point(self.factor, gt, denoised_coarse) # B n k  #idx = knn_point(self.factor//2, gt, denoised_coarse
         denoised_target = index_points(gt, idx) # B n k 3
         # print(denoised_target.shape)
-        denoised_target = denoised_target.reshape(gt.size(0), -1, 3)  # (4, 64*32=2048, 3)
+        denoised_target = denoised_target.reshape(gt.size(0), -1, 3)  # (B, 64*32=2048, 3)
         assert denoised_target.size(1) == denoised_fine.size(1)
         loss_denoised = self.loss_func(denoised_fine.float(), denoised_target.float())
         loss_denoised = loss_denoised * 0.5
