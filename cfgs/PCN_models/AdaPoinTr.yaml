@@ -69,15 +69,17 @@ model : {
       block_style_list: [ 'attn-graph', 'attn'],
       combine_style: 'concat',
     },
-    temporal_config: {
+    cx_config: {
       embed_dim: 384,
       depth: 2,
       num_heads: 6,
-      k: 8,
+      k: 0,
       n_group: 2,
       mlp_ratio: 2.,
-      block_style_list: [ 'attn', 'attn' ],
-      combine_style: 'concat',
+      self_attn_block_style_list: ['attn', 'attn'],
+      self_attn_combine_style: 'concat',
+      cross_attn_block_style_list: ['attn', 'attn'],
+      cross_attn_combine_style: 'concat',
     },
     decoder_config: {
       embed_dim: 384,
