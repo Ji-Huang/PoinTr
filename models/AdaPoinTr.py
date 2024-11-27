@@ -1041,10 +1041,12 @@ class SpatialTemporalAttention(nn.Module):
         coor = coor.reshape(B, T * N, 3)  # (B, T * N, 3)
 
         # Let coor attend to x
-        coor_c2x = self.c2x(coor)  # (B, T * N, C)
-        coor_c2x = self.cx_attention(q=coor_c2x, v=x_spatials, q_pos=None, v_pos=None)
-        coor_c2x = self.norm2(coor_c2x)
-        coor_x2c = self.x2c(coor_c2x)  # (B, T * N, 3)
+        # coor_c2x = self.c2x(coor)  # (B, T * N, C)
+        # coor_c2x = self.cx_attention(q=coor_c2x, v=x_spatials, q_pos=None, v_pos=None)
+        # coor_c2x = self.norm2(coor_c2x)
+        # coor_x2c = self.x2c(coor_c2x)  # (B, T * N, 3)
+        x_x2c = self.x2c(x_spatials)   # (B, T * N, 3)
+        coor_x2c = self.cx_attention(q=coor, v=x_x2c, q_pos=None, v_pos=None)
 
         # Get idx from fps
         coor_x2c = coor_x2c.transpose(1, 2).contiguous().to(torch.float32)  # (B, 3, T * N)

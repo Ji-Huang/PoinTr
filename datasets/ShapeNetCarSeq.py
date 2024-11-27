@@ -166,33 +166,33 @@ class ShapeNet_Car_Seq(data.Dataset):
             # List all files in the directory to count available partial files
             available_files = sorted([f for f in os.listdir(partial_dir) if f.endswith('.pcd')])
 
-            for idx in range(len(available_files)):
-                partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
-                partial_data = {'partial': partial}
-                if self.transforms is not None:
-                    partial_data = self.transforms(partial_data)
-                # Append the concatenated result to the list
-                partials_data.append(partial_data['partial'])
+            # for idx in range(len(available_files)):
+            #     partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
+            #     partial_data = {'partial': partial}
+            #     if self.transforms is not None:
+            #         partial_data = self.transforms(partial_data)
+            #     # Append the concatenated result to the list
+            #     partials_data.append(partial_data['partial'])
 
-            # window_size = 9
-            # half_window = window_size // 2
-            #
-            # # # Iterate through each file
-            # # for i in range(len(available_files)):
-            # rand_idx = 6
-            #
-            # # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
-            # for offset in range(-half_window, half_window + 1):
-            #     idx = rand_idx + offset
-            #
-            #     # Ensure the index is within valid bounds
-            #     if 0 <= idx < len(available_files):
-            #         partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
-            #         partial_data = {'partial': partial}
-            #         if self.transforms is not None:
-            #             partial_data = self.transforms(partial_data)
-            #         # Append the concatenated result to the list
-            #         partials_data.append(partial_data['partial'])
+            window_size = 9
+            half_window = window_size // 2
+
+            # # Iterate through each file
+            # for i in range(len(available_files)):
+            rand_idx = 6
+
+            # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
+            for offset in range(-half_window, half_window + 1):
+                idx = rand_idx + offset
+
+                # Ensure the index is within valid bounds
+                if 0 <= idx < len(available_files):
+                    partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
+                    partial_data = {'partial': partial}
+                    if self.transforms is not None:
+                        partial_data = self.transforms(partial_data)
+                    # Append the concatenated result to the list
+                    partials_data.append(partial_data['partial'])
 
 
 

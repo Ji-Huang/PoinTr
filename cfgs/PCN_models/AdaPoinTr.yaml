@@ -70,9 +70,9 @@ model : {
       combine_style: 'concat',
     },
     cx_config: {
-      embed_dim: 384,
+      embed_dim: 3,
       depth: 2,
-      num_heads: 6,
+      num_heads: 1,
       k: 0,
       n_group: 2,
       mlp_ratio: 2.,
