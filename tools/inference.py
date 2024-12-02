@@ -130,7 +130,7 @@ def inference_multiple(model, pc_path, args, root=None):
         dataset_categories = json.loads(f.read())
 
     samples = dataset_categories["test"]
-    for s in samples[:3]:
+    for s in samples[:1]:
         gt_path = os.path.join(pc_file, "test", "complete", f'{s}.pcd')
         gt = IO.get(gt_path).astype(np.float32)
 
@@ -162,15 +162,21 @@ def inference_multiple(model, pc_path, args, root=None):
                     partial = IO.get(os.path.join(partial_path, f'{idx:03}.pcd')).astype(np.float32)
                     partial_data = {'input': partial}
                     partial_data = transform(partial_data)
+                    partial_data = partial_data['input']
                     # Append the concatenated result to the list
-                    partials_data.append(partial_data['input'].unsqueeze(0))
+                    partials_data.append(partial_data.unsqueeze(0))
 
             # ret = model(partials_data.to(args.device.lower()))
             cuda_partials = [partial.to(args.device.lower()) for partial in partials_data]
             ret = model(cuda_partials)
 
-            dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
+            dense_points = ret[-3].squeeze(0).detach().cpu().numpy()
             coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
+            updated_coor = ret[-2].squeeze(0).detach().cpu().numpy()
+            coor = ret[-1].squeeze(0).detach().cpu().numpy()
+
+            inputs = [partial.squeeze(0).numpy() for partial in partials_data]
+            input = np.vstack(inputs)
 
             if args.out_pc_root != '':
                 target_path = os.path.join(args.out_pc_root, s, f'{6:02}')
@@ -178,6 +184,9 @@ def inference_multiple(model, pc_path, args, root=None):
 
                 np.save(os.path.join(target_path, f'{i:03}_fine.npy'), dense_points)
                 np.save(os.path.join(target_path, f'{i:03}_coarse.npy'), coarse_points)
+                np.save(os.path.join(target_path, f'{i:03}_ucoor.npy'), updated_coor)
+                np.save(os.path.join(target_path, f'{i:03}_coor.npy'), coor)
+                np.save(os.path.join(target_path, f'{i:03}_input.npy'), input)
                 np.save(os.path.join(target_path, 'gt.npy'), gt)
 
     return

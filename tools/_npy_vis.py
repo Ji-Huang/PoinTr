@@ -1,23 +1,56 @@
 import numpy as np
 import open3d as o3d
 import os
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from mpl_toolkits.mplot3d import Axes3D
 
 
 pcd_dir = '../inference_result_PCA_05c/1198255e3d20d2f323f3ca54768fe2ee/06'
-pcd_dir2 = '../inference_result_PCA_01o'
-for file in sorted(os.listdir(pcd_dir)):
-    if file.endswith('_fine.npy'):
-        points = np.load(os.path.join(pcd_dir, file))  # Load the .npy file
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points)
-        pcd.paint_uniform_color([0, 0, 1])
-        vis = o3d.visualization.Visualizer
-        vis.create_window(window_name="O3D", width=1920, height=1080)
-        view_control = vis.get_view_control()
-        view_control.set_lookat([0, 0, 0])
-        view_control.set_up([0, 1, 0])
-        view_control.set_front([0, 0, -1])
-        vis.run
+files = sorted([f for f in os.listdir(pcd_dir) if f.endswith('_fine.npy')])
+point_sequences = [np.load(os.path.join(pcd_dir, file)) for file in files]
+
+
+# Set equal aspect ratio for 3D
+def set_equal_aspect(ax, points):
+    max_range = np.ptp(points, axis=0).max() / 2.0
+    mid = points.mean(axis=0)
+    ax.set_xlim(mid[0] - max_range, mid[0] + max_range)
+    ax.set_ylim(mid[1] - max_range, mid[1] + max_range)
+    ax.set_zlim(mid[2] - max_range, mid[2] + max_range)
+
+
+# Initialize the plot
+fig = plt.figure()
+ax = fig.add_subplot(projection='3d')
+
+# Set initial view and axis limits
+points = point_sequences[0]
+set_equal_aspect(ax, points)
+ax.scatter(points[:, 2], points[:, 0], points[:, 1], c='blue', alpha=0.6, s=0.1)
+ax.set_title("Frame 0")
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_zlabel('Z')
+ax.view_init(elev=30, azim=45)  # Set isometric view for the first frame
+
+
+# Update function for animation
+def update(frame):
+    points = point_sequences[frame]
+    # Remove the previous points by removing the scatter plot object
+    for artist in ax.artists + ax.collections:
+        artist.remove()
+    ax.scatter(points[:, 2], points[:, 0], points[:, 1], c='blue', alpha=0.6, s=0.1)
+    set_equal_aspect(ax, points)
+    ax.set_title(f"Frame {frame}")
+
+
+# Animate the sequence
+ani = FuncAnimation(fig, update, frames=len(point_sequences), interval=200)
+
+# Show the animation
+plt.show()
         # o3d.visualization.draw_geometries([pcd])
 
 # pcd_list = []

@@ -1003,19 +1003,19 @@ class SpatialTemporalAttention(nn.Module):
         super(SpatialTemporalAttention, self).__init__()
 
         spatial_config = config.spatial_config
-        # cx_config = config.cx_config
+        cx_config = config.cx_config
         encoder_config = config.encoder_config
         dim = encoder_config.embed_dim
 
         self.spatial_attention = PointTransformerEncoderEntry(spatial_config)
-        # self.cx_attention = PointTransformerDecoderEntry(cx_config)
+        self.cx_attention = PointTransformerDecoderEntry(cx_config)
 
         # Norm layers for spatial and temporal attention
         self.norm1 = nn.LayerNorm(dim)
         # self.norm2 = nn.LayerNorm(dim)
         #
         # self.c2x = Mlp(in_features=3, hidden_features=dim, out_features=dim)
-        # self.x2c = Mlp(in_features=dim, hidden_features=3, out_features=3)
+        self.x2c = Mlp(in_features=dim, hidden_features=3, out_features=3)
 
     def forward(self, coor, x):
         """
@@ -1044,23 +1044,20 @@ class SpatialTemporalAttention(nn.Module):
         # coor_c2x = self.c2x(coor)  # (B, T * N, C)
         # coor_c2x = self.cx_attention(q=coor_c2x, v=x_spatials, q_pos=None, v_pos=None)
         # coor_c2x = self.norm2(coor_c2x)
-        # coor_x2c = self.x2c(coor_c2x)  # (B, T * N, 3)
-        # x_x2c = self.x2c(x_spatials)   # (B, T * N, 3)
-        # coor_x2c = self.cx_attention(q=coor, v=x_x2c, q_pos=None, v_pos=None)
+        # coor_x2c = self.x2c(coor_c2x).float()  # (B, T * N, 3)
 
-        # Get idx from fps
-        # coor_x2c = coor_x2c.transpose(1, 2).contiguous().to(torch.float32)  # (B, 3, T * N)
+        x_x2c = self.x2c(x_spatials)   # (B, T * N, 3)
+        coor_x2c = self.cx_attention(q=coor, v=x_x2c, q_pos=coor, v_pos=coor)
 
         # Gather coor and x
-        coor = coor.transpose(1, 2).contiguous()  # [B, 3, T * N]
-        fps_idx = pointnet2_utils.furthest_point_sample(coor, N)  # (B, N)
-        updated_coor = pointnet2_utils.gather_operation(coor, fps_idx)  # [B, 3, N]
-        updated_coor = updated_coor.transpose(1, 2).contiguous()  # [B, N, 3]
+        fps_idx = pointnet2_utils.furthest_point_sample(coor_x2c, N)  # (B, N)
+        updated_coor = pointnet2_utils.gather_operation(coor.transpose(1, 2).contiguous(),
+                                                        fps_idx).transpose(1, 2).contiguous()  # [B, N, 3]
 
-        x_spatials = x_spatials.transpose(1, 2).contiguous()  # [B, C, T * N]
-        updated_features = pointnet2_utils.gather_operation(x_spatials, fps_idx)  # [B, C, N]
-        updated_features = updated_features.transpose(1, 2).contiguous()  # [B, N, C]
+        updated_features = pointnet2_utils.gather_operation(x_spatials.transpose(1, 2).contiguous(),
+                                                            fps_idx).transpose(1, 2).contiguous()  # [B, N, C]
 
+        # return updated_coor, updated_features, coor
         return updated_coor, updated_features
 
 
@@ -1204,12 +1201,14 @@ class PCTransformerBase(nn.Module):
         x = torch.stack(encoder_x, dim=1)  # (B, T, N, C)
 
         # Apply attention to the concatenated coordinates and features
+        # updated_coor, updated_x, coor = self.attention(coor, x)
         updated_coor, updated_x = self.attention(coor, x)
 
         # Apply decoder to the attention output
         q, coarse, denoise_length = self.decoder(xyz=point_clouds[-1], coor=updated_coor,
                                                  x=updated_x)
 
+        # return q, coarse, denoise_length, updated_coor, coor
         return q, coarse, denoise_length
 
 ######################################## PoinTr ########################################  
@@ -1253,6 +1252,7 @@ class AdaPoinTr(nn.Module):
         self.loss_func = ChamferDistanceL1()
 
     def get_loss(self, ret, gt, epoch=1):
+        # pred_coarse, denoised_coarse, denoised_fine, pred_fine, updated_coor, coor = ret
         pred_coarse, denoised_coarse, denoised_fine, pred_fine = ret
         # print(pred_coarse.size(), denoised_coarse.size(), denoised_fine.size(), pred_fine.size())
         
@@ -1277,6 +1277,7 @@ class AdaPoinTr(nn.Module):
         return loss_denoised, loss_recon
 
     def forward(self, xyz):
+        # q, coarse_point_cloud, denoise_length, updated_coor, coor = self.base_model(xyz) # B M C and B M 3
         q, coarse_point_cloud, denoise_length = self.base_model(xyz) # B M C and B M 3
         # print(q.size(), coarse_point_cloud.size(), denoise_length)
         # torch.Size([16, 576, 384]), torch.Size([16, 576, 3]), 64
@@ -1324,6 +1325,7 @@ class AdaPoinTr(nn.Module):
             assert pred_fine.size(1) == 16384  # self.num_query * self.factor
             assert pred_coarse.size(1) == 512  # self.num_query
 
+            # ret = (pred_coarse, denoised_coarse, denoised_fine, pred_fine, updated_coor, coor)
             ret = (pred_coarse, denoised_coarse, denoised_fine, pred_fine)
             return ret
 
@@ -1334,5 +1336,6 @@ class AdaPoinTr(nn.Module):
             assert rebuild_points.size(1) == 16384  # self.num_query * self.factor
             assert coarse_point_cloud.size(1) == 512  # self.num_query
 
+            # ret = (coarse_point_cloud, rebuild_points, updated_coor, coor)
             ret = (coarse_point_cloud, rebuild_points)
             return ret
