@@ -1002,16 +1002,16 @@ class SpatialTemporalAttention(nn.Module):
     def __init__(self, config, qkv_bias=False, attn_drop=0., proj_drop=0.):
         super(SpatialTemporalAttention, self).__init__()
 
-        spatial_config = config.spatial_config
+        # spatial_config = config.spatial_config
         cx_config = config.cx_config
         encoder_config = config.encoder_config
         dim = encoder_config.embed_dim
 
-        self.spatial_attention = PointTransformerEncoderEntry(spatial_config)
+        # self.spatial_attention = PointTransformerEncoderEntry(spatial_config)
         self.cx_attention = PointTransformerDecoderEntry(cx_config)
 
         # Norm layers for spatial and temporal attention
-        self.norm1 = nn.LayerNorm(dim)
+        # self.norm1 = nn.LayerNorm(dim)
         # self.norm2 = nn.LayerNorm(dim)
         #
         # self.c2x = Mlp(in_features=3, hidden_features=dim, out_features=dim)
@@ -1019,26 +1019,27 @@ class SpatialTemporalAttention(nn.Module):
 
     def forward(self, coor, x):
         """
-        coor: (B, N, 3) -> Coordinates of the center points.
+        coor: (B, T, N, 3) -> Coordinates of the center points.
         x: (B, T, N, C) -> Embeddings of the point clouds.
            B = batch size, T = number of temporal views, N = number of points per cloud, C = embedding dimension.
         """
         B, T, N, C = x.shape
 
-        # Step 1: Spatial Attention for each partial point cloud
-        x_spatials = []
-        for t in range(T):  # Process each time step separately for spatial attention
-            x_t = x[:, t, :, :]  # (B, N, C) for time step t
-            coor_t = coor[:, t, :, :]
-
-            # Apply spatial attention
-            x_spatial = self.spatial_attention(x_t, coor_t)  # (B, N, C)
-            x_spatial = self.norm1(x_spatial)  # (B, N, C)
-            x_spatials.append(x_spatial)
-
-        # Cat spatial embeddings
-        x_spatials = torch.cat(x_spatials, dim=1)  # (B, T * N, C)
+        # # Step 1: Spatial Attention for each partial point cloud
+        # x_spatials = []
+        # for t in range(T):  # Process each time step separately for spatial attention
+        #     x_t = x[:, t, :, :]  # (B, N, C) for time step t
+        #     coor_t = coor[:, t, :, :]
+        #
+        #     # Apply spatial attention
+        #     x_spatial = self.spatial_attention(x_t, coor_t)  # (B, N, C)
+        #     x_spatial = self.norm1(x_spatial)  # (B, N, C)
+        #     x_spatials.append(x_spatial)
+        #
+        # # Cat spatial embeddings
+        # x_spatials = torch.cat(x_spatials, dim=1)  # (B, T * N, C)
         coor = coor.reshape(B, T * N, 3)  # (B, T * N, 3)
+        x = x.reshape(B, T * N, -1)  # (B, T * N, C)
 
         # Let coor attend to x
         # coor_c2x = self.c2x(coor)  # (B, T * N, C)
@@ -1046,15 +1047,16 @@ class SpatialTemporalAttention(nn.Module):
         # coor_c2x = self.norm2(coor_c2x)
         # coor_x2c = self.x2c(coor_c2x).float()  # (B, T * N, 3)
 
-        x_x2c = self.x2c(x_spatials)   # (B, T * N, 3)
+        x_x2c = self.x2c(x)   # (B, T * N, 3)
         coor_x2c = self.cx_attention(q=coor, v=x_x2c, q_pos=coor, v_pos=coor)
+        coor_x2c = coor_x2c.float()
 
         # Gather coor and x
         fps_idx = pointnet2_utils.furthest_point_sample(coor_x2c, N)  # (B, N)
-        updated_coor = pointnet2_utils.gather_operation(coor.transpose(1, 2).contiguous(),
+        updated_coor = pointnet2_utils.gather_operation(coor.transpose(1, 2).contiguous().float(),
                                                         fps_idx).transpose(1, 2).contiguous()  # [B, N, 3]
 
-        updated_features = pointnet2_utils.gather_operation(x_spatials.transpose(1, 2).contiguous(),
+        updated_features = pointnet2_utils.gather_operation(x.transpose(1, 2).contiguous().float(),
                                                             fps_idx).transpose(1, 2).contiguous()  # [B, N, C]
 
         # return updated_coor, updated_features, coor
