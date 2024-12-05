@@ -109,7 +109,7 @@ def inference_single(model, pc_path, args, config, root=None):
     return
 
 
-def inference_multiple(model, pc_path, args, root=None):
+def inference_ShapeNet(model, pc_path, args, root=None):
     if root is not None:
         pc_file = os.path.join(root, pc_path)
     else:
@@ -191,6 +191,74 @@ def inference_multiple(model, pc_path, args, root=None):
 
     return
 
+
+def inference_LiangDao(model, pc_path, args, root=None):
+    if root is not None:
+        pc_file = os.path.join(root, pc_path)
+    else:
+        pc_file = pc_path
+
+    transform = Compose([{
+        'callback': 'UpSamplePoints',
+        'parameters': {
+            'n_points': 256  #2048
+        },
+        'objects': ['input']
+    }, {
+        'callback': 'ToTensor',
+        'objects': ['input']
+    }])
+
+    available_files = sorted([f for f in os.listdir(pc_file) if f.endswith('.pcd')])
+    view_count = len(available_files)
+    print(view_count)
+
+    window_size = 9
+    half_window = window_size // 2
+
+    # # Iterate through each file
+    # for i in range(len(available_files)):
+    # rand_idx = 6
+    for i in range(half_window + 1, view_count - half_window - 1):
+        partials_data = []
+        # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
+        for offset in range(-half_window, half_window + 1):
+            idx = i + offset
+
+            # Ensure the index is within valid bounds
+            if 0 <= idx < len(available_files):
+                partial = IO.get(os.path.join(pc_file, available_files[idx])).astype(np.float32)
+                partial_data = {'input': partial}
+                partial_data = transform(partial_data)
+                partial_data = partial_data['input']
+                # Append the concatenated result to the list
+                partials_data.append(partial_data.unsqueeze(0))
+
+        # ret = model(partials_data.to(args.device.lower()))
+        cuda_partials = [partial.to(args.device.lower()) for partial in partials_data]
+        ret = model(cuda_partials)
+
+        dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
+        coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
+        # updated_coor = ret[-2].squeeze(0).detach().cpu().numpy()
+        # coor = ret[-1].squeeze(0).detach().cpu().numpy()
+
+        inputs = [partial.squeeze(0).numpy() for partial in partials_data]
+        input = np.vstack(inputs)
+
+        if args.out_pc_root != '':
+            target_path = os.path.join(args.out_pc_root, 'LiangDao_Cars_79')
+            os.makedirs(target_path, exist_ok=True)
+
+            np.save(os.path.join(target_path, f'{available_files[i][8:13]}_fine.npy'), dense_points)
+            np.save(os.path.join(target_path, f'{available_files[i][8:13]}_coarse.npy'), coarse_points)
+            # np.save(os.path.join(target_path, f'{i:03}_ucoor.npy'), updated_coor)
+            # np.save(os.path.join(target_path, f'{i:03}_coor.npy'), coor)
+            np.save(os.path.join(target_path, f'{available_files[i][8:13]}_input.npy'), input)
+
+    return
+
+
 def main():
     args = get_args()
 
@@ -208,7 +276,7 @@ def main():
     #         inference_single(base_model, pc_file, args, config, root=args.pc_root)
     # else:
     #     inference_single(base_model, args.pc, args, config)
-    inference_multiple(base_model, args.pc_root, args)
+    inference_LiangDao(base_model, args.pc_root, args)
 
 if __name__ == '__main__':
     main()
