@@ -328,7 +328,7 @@ class TransformerEncoder(nn.Module):
             ))
 
     def forward(self, x, pos):
-        idx = idx = knn_point(self.k, pos, pos)
+        idx = knn_point(self.k, pos, pos)
         for _, block in enumerate(self.blocks):
             x = block(x, pos, idx=idx) 
         return x
@@ -1068,44 +1068,65 @@ class SpatialTemporalAttention(nn.Module):
         encoder_config = config.encoder_config
 
         dim = encoder_config.embed_dim
-        num_points = config.center_num[-1]
+        global_feature_dim = config.global_feature_dim
+        # num_points = config.center_num[-1]
 
         # Define spatial attention (intra-cloud self attention)
-        self.spatial_attention = PointTransformerEncoderEntry(config.spatial_config)
+        # self.spatial_attention = PointTransformerEncoderEntry(config.spatial_config)
         # Define temporal attention (inter-cloud cross attention)
         self.temporal_attention = PointTransformerDecoderEntry(config.temporal_config)
 
-        self.query_emb = nn.Embedding(num_points, dim)  # [64, 384]
+        # self.query_emb = nn.Embedding(num_points, dim)  # [64, 384]
         self.q2q = PointTransformerEncoderEntry(config.q2q_config)
+        self.project = nn.Sequential(
+            nn.Linear(dim, 1024),
+            nn.GELU(),
+            nn.Linear(1024, global_feature_dim))
+        self.query_gen = nn.Sequential(
+            nn.Linear(global_feature_dim + dim, 1024),
+            nn.GELU(),
+            nn.Linear(1024, 1024),
+            nn.GELU(),
+            nn.Linear(1024, dim)
+        )
 
-        self.update_x = Mlp(in_features=dim, hidden_features=dim, out_features=dim)
+        # self.update_x = Mlp(in_features=dim, hidden_features=dim, out_features=dim)
 
     def forward(self, coor, x):
         """
-        coor: (B, N, 3) -> Coordinates of the center points.
+        coor: (B, T, N, 3) -> Coordinates of the center points.
         x: (B, T, N, C) -> Embeddings of the point clouds.
            B = batch size, T = number of temporal views, N = number of points per cloud, C = embedding dimension.
         """
         B, T, N, C = x.shape
         # point_query = self.query_emb.weight.unsqueeze(0).repeat(B, 1, 1)
+        x_0 = x[:, 0, :, :]  # B N C
+        global_feature_x0 = self.project(x_0)  # B N 1024
+        global_feature_x0 = torch.max(global_feature_x0, dim=1)[0]  # B 1024
+
+        point_query = self.query_gen(
+            torch.cat([
+                global_feature_x0.unsqueeze(1).expand(-1, x_0.size(1), -1),
+                x_0], dim=-1))  # B N 1024+C
 
         for t in range(T):  # Process each time step separately for spatial attention
             x_t = x[:, t, :, :]  # (B, N, C) for time step t
             coor_t = coor[:, t, :, :]
 
             # Apply spatial self attention
-            x_spatial = self.spatial_attention(x_t, coor_t)  # (B, N, C)
+            # x_spatial = self.spatial_attention(x_t, coor_t)  # (B, N, C)
             # Apply temporal cross attention
-            if t == 0:
-                point_query = self.temporal_attention(x_spatial, x_spatial, coor_t, coor_t)
-            else:
-                point_query = self.temporal_attention(point_query, x_spatial, coor_t, coor_t)  # (B, N, C) # coor_t is place holder
+            point_query = self.temporal_attention(point_query, x_t, coor_t, coor_t)  # (B, N, C)
             # Apply self attention
             point_query = self.q2q(point_query, coor_t)  # coor_t is place holder
 
-        updated_x = self.update_x(point_query)
+        # Apply FPS to coor
+        coor = coor.reshape(B, T*N, 3)
+        fps_idx = pointnet2_utils.furthest_point_sample(coor, N)
+        updated_coor = pointnet2_utils.gather_operation(coor.transpose(1, 2).contiguous().float(),
+                                                        fps_idx).transpose(1, 2).contiguous()  # [B, N, 3]
 
-        return updated_x
+        return point_query, updated_coor
 
 
 class PCTransformerDe(nn.Module):
@@ -1246,15 +1267,7 @@ class PCTransformerBase(nn.Module):
         x = torch.stack(encoder_x, dim=1)  # (B, T, N, C)
 
         # Apply SpatialTemporalAttention
-        updated_x = self.attention(coor, x)
-
-        # Apply FPS to coor
-        B, T, N, _ = coor.shape
-        coor = coor.view(B, T*N, 3)
-        coor = coor.transpose(1, 2).contiguous()
-        fps_idx = pointnet2_utils.furthest_point_sample(coor, N)
-        updated_coor = pointnet2_utils.gather_operation(coor, fps_idx)
-        updated_coor = updated_coor.transpose(1, 2).contiguous()
+        updated_x, updated_coor = self.attention(coor, x)
 
         # Apply decoder to the attention output
         q, coarse, denoise_length = self.decoder(xyz=point_clouds[-1], coor=updated_coor,

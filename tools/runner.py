@@ -488,7 +488,8 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
     test_losses = AverageMeter(['SparseLossL1', 'SparseLossL2', 'DenseLossL1', 'DenseLossL2'])
     test_metrics = AverageMeter(Metrics.names())
     category_metrics = dict()
-    n_samples = len(test_dataloader) # bs is 1
+    n_samples = len(test_dataloader)  # bs is 1
+    window_size = config.model.num_point_clouds
 
     with torch.no_grad():
         for idx, (taxonomy_ids, data) in enumerate(test_dataloader):
@@ -503,46 +504,37 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
             total_sparse_loss_l2 = 0
             total_dense_loss_l1 = 0
             total_dense_loss_l2 = 0
-            view_count = 1  # Default is 1 view if dataset is not ShapeNet_Car_Seq
+            # total_emd_loss = 0
+            # view_count = 1  # Default is 1 view if dataset is not ShapeNet_Car_Seq
 
             if dataset_name == 'ShapeNet_Car_Seq':
-                # partial = data[0][random.randint(0, 14)].cuda()   
+                # partial = data[0][random.randint(0, 14)].cuda()
                 partial_views = data[0]  # A list of partial pcds: (1 pcd * 15 trajs) or (all pcds in 1 traj)
                 gt = data[1].cuda()
 
                 view_count = len(partial_views)
-                # window_size = 3  #
-                # aggregated_pcds = []
-                #
-                # # Slide over the list using a window of size 3
-                # for i in range(view_count - window_size + 1):
-                #     window_pcds = partial_views[i:i+window_size]
-                #     # Merge point clouds in the window
-                #     all_points = []
-                #     for pcd in window_pcds:
-                #         # print(pcd.shape)
-                #         # points = np.asarray(pcd.points)  # Extract points from the PCD
-                #         all_points.append(pcd)
-                #     combined_points = np.concatenate(all_points, axis=1)
-                #     # print(len(all_points))
-                #     # print(combined_points.shape)
-                #     # combined_points = np.vstack(all_points)
-                #     combined_pcd = o3d.geometry.PointCloud()
-                #     combined_pcd.points = o3d.utility.Vector3dVector(combined_points)
-                #
-                #     aggregated_pcds.append(combined_pcd)
-                #
-                # view_count = len(aggregated_pcds)  #
+                half_window = window_size // 2
+                # Initialize total_metrics to accumulate metrics across views
+                total_metrics = [0.0] * len(Metrics.names())
 
-                # Iterate over each partial view
-                
-                for partial_view in partial_views:
-                    partial = partial_view.cuda()
-                # for partial_view in aggregated_pcds:
-                #     partial = partial_view.cuda()
+                # Main loop through files, avoiding boundaries based on window size
+                for i in range(half_window + 1, view_count - half_window - 1):
+                    # Temporary list to gather partials within the current window
+                    window_partials = []
+
+                    # Loop through the window size to gather partials from (idx - half_window) to (idx + half_window)
+                    for offset in range(-half_window, half_window + 1):
+                        current_idx = i + offset
+
+                        # Ensure the index is within valid bounds
+                        if 0 <= current_idx < view_count:
+                            partial_data = partial_views[current_idx]
+                            window_partials.append(partial_data)
+
+                    cuda_window_partials = [window_partial.cuda() for window_partial in window_partials]
 
                     # Forward pass
-                    ret = base_model(partial)
+                    ret = base_model(cuda_window_partials)
                     coarse_points = ret[0]
                     dense_points = ret[-1]
 
@@ -551,40 +543,49 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
                     total_sparse_loss_l2 += ChamferDisL2(coarse_points, gt)
                     total_dense_loss_l1 += ChamferDisL1(dense_points, gt)
                     total_dense_loss_l2 += ChamferDisL2(dense_points, gt)
+                    # total_emd_loss += Metrics.get_emd(dense_points, gt)
 
+                    _metrics = Metrics.get(dense_points, gt, require_emd=False)
+                    _metrics = [m.item() for m in _metrics]
+                    # Accumulate metrics
+                    for j, metric in enumerate(_metrics):
+                        total_metrics[j] += metric
+
+                num_windows = view_count - 2 * half_window - 1
                 # Average the losses over the number of views
-                avg_sparse_loss_l1 = total_sparse_loss_l1 / view_count
-                avg_sparse_loss_l2 = total_sparse_loss_l2 / view_count
-                avg_dense_loss_l1 = total_dense_loss_l1 / view_count
-                avg_dense_loss_l2 = total_dense_loss_l2 / view_count
+                avg_sparse_loss_l1 = total_sparse_loss_l1 / num_windows
+                avg_sparse_loss_l2 = total_sparse_loss_l2 / num_windows
+                avg_dense_loss_l1 = total_dense_loss_l1 / num_windows
+                avg_dense_loss_l2 = total_dense_loss_l2 / num_windows
+                # avg_emd_loss = total_emd_loss / num_windows
 
-                test_losses.update([avg_sparse_loss_l1.item() * 1000, avg_sparse_loss_l2.item() * 1000, avg_dense_loss_l1.item() * 1000, avg_dense_loss_l2.item() * 1000])
+                avg_metrics = [total_metric / num_windows for total_metric in total_metrics]
 
-                _metrics = Metrics.get(dense_points, gt, require_emd=True)
-                # test_metrics.update(_metrics)
-
-                if taxonomy_id not in category_metrics:
-                    category_metrics[taxonomy_id] = AverageMeter(Metrics.names())
-                category_metrics[taxonomy_id].update(_metrics)
+                test_losses.update([avg_sparse_loss_l1.item() * 1000,
+                                    avg_sparse_loss_l2.item() * 1000,
+                                    avg_dense_loss_l1.item() * 1000,
+                                    avg_dense_loss_l2.item() * 1000])
+                for _taxonomy_id in taxonomy_ids:
+                    if _taxonomy_id not in category_metrics:
+                        category_metrics[_taxonomy_id] = AverageMeter(Metrics.names())
+                    category_metrics[_taxonomy_id].update(avg_metrics)
             else:
                 raise NotImplementedError(f'Train phase do not support {dataset_name}')
 
-
-            if (idx+1) % 200 == 0:
                 # print_log('Test[%d/%d] Taxonomy = %s Sample = %s Losses = %s Metrics = %s' %
-                #             (idx + 1, n_samples, taxonomy_id, model_id, ['%.4f' % l for l in test_losses.val()], 
+                #             (idx + 1, n_samples, taxonomy_id, model_id, ['%.4f' % l for l in test_losses.val()],
                 #             ['%.4f' % m for m in _metrics]), logger=logger)
-                print_log(f'Test[{idx + 1}/{n_samples}] Taxonomy = {taxonomy_id}, '
-                          f'Losses = {["%.4f" % l for l in test_losses.val()]}, '
-                          f'Metrics = {["%.4f" % m for m in _metrics]}', logger=logger)
-                
-        for _,v in category_metrics.items():
+            print_log(f'Test[{idx + 1}/{n_samples}] Taxonomy = {taxonomy_id}, '
+                      f'Losses = {["%.4f" % l for l in test_losses.val()]}, '
+                      f'Metrics = {["%.4f" % m for m in avg_metrics]}', logger=logger)
+
+        for _, v in category_metrics.items():
             test_metrics.update(v.avg())
         print_log('[TEST] Metrics = %s' % (['%.4f' % m for m in test_metrics.avg()]), logger=logger)
-     
+
     # Print testing results
     # shapenet_dict = json.load(open('./data/shapenet_synset_dict.json', 'r'))
-    print_log('============================ TEST RESULTS ============================',logger=logger)
+    print_log('============================ TEST RESULTS ============================', logger=logger)
     # msg = ''
     # msg += 'Taxonomy\t'
     # msg += '#Sample\t'
@@ -593,14 +594,15 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
     # msg += '#ModelName\t'
     # print_log(msg, logger=logger)
 
-    msg = 'Taxonomy\t#Sample\t' + '\t'.join(test_metrics.items) #+ '\t#ModelName\t'
+    msg = 'Taxonomy\t#Sample\t' + '\t'.join(test_metrics.items)  # + '\t#ModelName\t'
     print_log(msg, logger=logger)
 
     for taxonomy_id in category_metrics:
         msg = f'{taxonomy_id}\t{category_metrics[taxonomy_id].count(0)}\t'
         # msg += '\t'.join(f'{value:.3f}' for value in category_metrics[taxonomy_id].avg())
         # msg += f'{shapenet_dict[taxonomy_id]}\t'
-        msg += '\t'.join([f'{v:.3f}' for v in category_metrics[taxonomy_id].avg()]) + '\t' #+ taxonomy_id + '\t'
+        msg += '\t'.join(
+            [f'{v:.3f}' for v in category_metrics[taxonomy_id].avg()]) + '\t'  # + taxonomy_id + '\t'
         print_log(msg, logger=logger)
 
     msg = 'Overall\t\t' + '\t'.join(f'{value:.3f}' for value in test_metrics.avg())
