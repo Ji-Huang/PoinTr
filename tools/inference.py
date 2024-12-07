@@ -109,7 +109,7 @@ def inference_single(model, pc_path, args, config, root=None):
     return
 
 
-def inference_multiple(model, pc_path, args, root=None):
+def inference_ShapeNet(model, pc_path, args, root=None):
     if root is not None:
         pc_file = os.path.join(root, pc_path)
     else:
@@ -130,54 +130,89 @@ def inference_multiple(model, pc_path, args, root=None):
         dataset_categories = json.loads(f.read())
 
     samples = dataset_categories["test"]
-    for s in samples:
+    for s in samples[:1]:
         gt_path = os.path.join(pc_file, "test", "complete", f'{s}.pcd')
         gt = IO.get(gt_path).astype(np.float32)
 
         partial_path = os.path.join(pc_file, "test", "partial", s, f'{6:02}')
         print(partial_path)
-
-        partials_data = []
+        # partial_path = os.path.dirname(partial_path)
+        # print(partial_path)
 
         # partial_dir = os.path.dirname(partial_path)
         # List all files in the directory to count available partial files
         available_files = sorted([f for f in os.listdir(partial_path) if f.endswith('.pcd')])
+        view_count = len(available_files)
+        print(view_count)
 
-        window_size = 13
-        half_window = window_size // 2
+        for i in range(view_count):
+            partial = IO.get(os.path.join(partial_path, f'{i:03}.pcd')).astype(np.float32)
+            partial_data = {'input': partial}
+            partial_data = transform(partial_data)
+            partial_data = partial_data['input']
+            ret = model(partial_data.unsqueeze(0).to(args.device.lower()))
 
-        # # Iterate through each file
-        # for i in range(len(available_files)):
-        rand_idx = 6
+            dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
+            coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
 
-        # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
-        for offset in range(-half_window, half_window + 1):
-            idx = rand_idx + offset
+            if args.out_pc_root != '':
+                target_path = os.path.join(args.out_pc_root, s, f'{6:02}')
+                os.makedirs(target_path, exist_ok=True)
 
-            # Ensure the index is within valid bounds
-            if 0 <= idx < len(available_files):
-                partial = IO.get(os.path.join(partial_path, f'{idx:03}.pcd')).astype(np.float32)
-                partial_data = {'input': partial}
-                partial_data = transform(partial_data)
-                # Append the concatenated result to the list
-                partials_data.append(partial_data['input'].unsqueeze(0))
+                np.save(os.path.join(target_path, f'{i:03}_input.npy'), partial)
+                # np.save(os.path.join(target_path, f'{i:03}_input256.npy'), partial_data.numpy())
+                np.save(os.path.join(target_path, f'{i:03}_fine.npy'), dense_points)
+                np.save(os.path.join(target_path, f'{i:03}_coarse.npy'), coarse_points)
+                np.save(os.path.join(target_path, 'gt.npy'), gt)
 
-        # ret = model(partials_data.to(args.device.lower()))
-        cuda_partials = [partial.to(args.device.lower()) for partial in partials_data]
-        ret = model(cuda_partials)
+    return
+
+
+def inference_LiangDao(model, pc_path, args, root=None):
+    if root is not None:
+        pc_file = os.path.join(root, pc_path)
+    else:
+        pc_file = pc_path
+
+    transform = Compose([{
+        'callback': 'UpSamplePoints',
+        'parameters': {
+            'n_points': 256  #2048
+        },
+        'objects': ['input']
+    }, {
+        'callback': 'ToTensor',
+        'objects': ['input']
+    }])
+
+    available_files = sorted([f for f in os.listdir(pc_file) if f.endswith('.pcd')])
+    view_count = len(available_files)
+    print(view_count)
+
+    for i in range(view_count):
+        partial = IO.get(os.path.join(pc_file, available_files[i])).astype(np.float32)
+        partial_data = {'input': partial}
+        partial_data = transform(partial_data)
+        partial_data = partial_data['input']
+        ret = model(partial_data.unsqueeze(0).to(args.device.lower()))
 
         dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
         coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
+        inputs = partial_data.numpy()
+        input = np.vstack(inputs)
 
         if args.out_pc_root != '':
-            target_path = os.path.join(args.out_pc_root, s)
+            target_path = os.path.join(args.out_pc_root, 'LiangDao_Cars_79')
             os.makedirs(target_path, exist_ok=True)
 
-            np.save(os.path.join(target_path, 'fine.npy'), dense_points)
-            np.save(os.path.join(target_path, 'coarse.npy'), coarse_points)
-            np.save(os.path.join(target_path, 'gt.npy'), gt)
+            np.save(os.path.join(target_path, f'{available_files[i][8:13]}_fine.npy'), dense_points)
+            np.save(os.path.join(target_path, f'{available_files[i][8:13]}_coarse.npy'), coarse_points)
+            # np.save(os.path.join(target_path, f'{i:03}_ucoor.npy'), updated_coor)
+            # np.save(os.path.join(target_path, f'{i:03}_coor.npy'), coor)
+            np.save(os.path.join(target_path, f'{available_files[i][8:13]}_input.npy'), input)
 
     return
+
 
 def main():
     args = get_args()
@@ -196,7 +231,7 @@ def main():
     #         inference_single(base_model, pc_file, args, config, root=args.pc_root)
     # else:
     #     inference_single(base_model, args.pc, args, config)
-    inference_multiple(base_model, args.pc_root, args)
+    inference_LiangDao(base_model, args.pc_root, args)
 
 if __name__ == '__main__':
     main()
