@@ -6,7 +6,7 @@ from matplotlib.animation import FuncAnimation
 from mpl_toolkits.mplot3d import Axes3D
 
 
-pcd_dir = '../inference_result_PCA_05c/1198255e3d20d2f323f3ca54768fe2ee/06'
+pcd_dir = '../inference_result_PCA_05zfpsr/10555502fa7b3027283ffcfc40c29975/00'
 files = sorted([f for f in os.listdir(pcd_dir) if f.endswith('_fine.npy')])
 point_sequences = [np.load(os.path.join(pcd_dir, file)) for file in files]
 

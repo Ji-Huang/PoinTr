@@ -130,64 +130,64 @@ def inference_ShapeNet(model, pc_path, args, root=None):
         dataset_categories = json.loads(f.read())
 
     samples = dataset_categories["test"]
-    for s in samples[:1]:
+    for s in samples:
         gt_path = os.path.join(pc_file, "test", "complete", f'{s}.pcd')
         gt = IO.get(gt_path).astype(np.float32)
+        for j in range(15):
+            partial_path = os.path.join(pc_file, "test", "partial", s, f'{j:02}')
+            print(partial_path)
+            # partial_path = os.path.dirname(partial_path)
+            # print(partial_path)
 
-        partial_path = os.path.join(pc_file, "test", "partial", s, f'{6:02}')
-        print(partial_path)
-        # partial_path = os.path.dirname(partial_path)
-        # print(partial_path)
+            # partial_dir = os.path.dirname(partial_path)
+            # List all files in the directory to count available partial files
+            available_files = sorted([f for f in os.listdir(partial_path) if f.endswith('.pcd')])
+            view_count = len(available_files)
+            # print(view_count)
 
-        # partial_dir = os.path.dirname(partial_path)
-        # List all files in the directory to count available partial files
-        available_files = sorted([f for f in os.listdir(partial_path) if f.endswith('.pcd')])
-        view_count = len(available_files)
-        print(view_count)
+            window_size = 9
+            half_window = window_size // 2
 
-        window_size = 9
-        half_window = window_size // 2
+            # # Iterate through each file
+            # for i in range(len(available_files)):
+            # rand_idx = 6
+            for i in range(half_window + 1, view_count - half_window - 1):
+                partials_data = []
+                # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
+                for offset in range(-half_window, half_window + 1):
+                    idx = i + offset
 
-        # # Iterate through each file
-        # for i in range(len(available_files)):
-        # rand_idx = 6
-        for i in range(half_window + 1, view_count - half_window - 1):
-            partials_data = []
-            # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
-            for offset in range(-half_window, half_window + 1):
-                idx = i + offset
+                    # Ensure the index is within valid bounds
+                    if 0 <= idx < len(available_files):
+                        partial = IO.get(os.path.join(partial_path, f'{idx:03}.pcd')).astype(np.float32)
+                        partial_data = {'input': partial}
+                        partial_data = transform(partial_data)
+                        partial_data = partial_data['input']
+                        # Append the concatenated result to the list
+                        partials_data.append(partial_data.unsqueeze(0))
 
-                # Ensure the index is within valid bounds
-                if 0 <= idx < len(available_files):
-                    partial = IO.get(os.path.join(partial_path, f'{idx:03}.pcd')).astype(np.float32)
-                    partial_data = {'input': partial}
-                    partial_data = transform(partial_data)
-                    partial_data = partial_data['input']
-                    # Append the concatenated result to the list
-                    partials_data.append(partial_data.unsqueeze(0))
+                # ret = model(partials_data.to(args.device.lower()))
+                cuda_partials = [partial.to(args.device.lower()) for partial in partials_data]
+                ret = model(cuda_partials)
 
-            # ret = model(partials_data.to(args.device.lower()))
-            cuda_partials = [partial.to(args.device.lower()) for partial in partials_data]
-            ret = model(cuda_partials)
+                dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
+                # coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
+                # updated_coor = ret[-2].squeeze(0).detach().cpu().numpy()
+                # coor = ret[-1].squeeze(0).detach().cpu().numpy()
+                #
+                # inputs = [partial.squeeze(0).numpy() for partial in partials_data]
+                # input = np.vstack(inputs)
 
-            dense_points = ret[-3].squeeze(0).detach().cpu().numpy()
-            coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
-            updated_coor = ret[-2].squeeze(0).detach().cpu().numpy()
-            coor = ret[-1].squeeze(0).detach().cpu().numpy()
+                if args.out_pc_root != '':
+                    target_path = os.path.join(args.out_pc_root, s, f'{j:02}')
+                    os.makedirs(target_path, exist_ok=True)
 
-            inputs = [partial.squeeze(0).numpy() for partial in partials_data]
-            input = np.vstack(inputs)
-
-            if args.out_pc_root != '':
-                target_path = os.path.join(args.out_pc_root, s, f'{6:02}')
-                os.makedirs(target_path, exist_ok=True)
-
-                np.save(os.path.join(target_path, f'{i:03}_fine.npy'), dense_points)
-                np.save(os.path.join(target_path, f'{i:03}_coarse.npy'), coarse_points)
-                np.save(os.path.join(target_path, f'{i:03}_ucoor.npy'), updated_coor)
-                np.save(os.path.join(target_path, f'{i:03}_coor.npy'), coor)
-                np.save(os.path.join(target_path, f'{i:03}_input.npy'), input)
-                np.save(os.path.join(target_path, 'gt.npy'), gt)
+                    np.save(os.path.join(target_path, f'{i:03}_fine.npy'), dense_points)
+                    # np.save(os.path.join(target_path, f'{i:03}_coarse.npy'), coarse_points)
+                    # np.save(os.path.join(target_path, f'{i:03}_ucoor.npy'), updated_coor)
+                    # np.save(os.path.join(target_path, f'{i:03}_coor.npy'), coor)
+                    # np.save(os.path.join(target_path, f'{i:03}_input.npy'), input)
+                    # np.save(os.path.join(target_path, 'gt.npy'), gt)
 
     return
 
@@ -276,7 +276,7 @@ def main():
     #         inference_single(base_model, pc_file, args, config, root=args.pc_root)
     # else:
     #     inference_single(base_model, args.pc, args, config)
-    inference_LiangDao(base_model, args.pc_root, args)
+    inference_ShapeNet(base_model, args.pc_root, args)
 
 if __name__ == '__main__':
     main()
