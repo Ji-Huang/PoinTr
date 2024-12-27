@@ -109,7 +109,7 @@ def inference_single(model, pc_path, args, config, root=None):
     return
 
 
-def inference_multiple(model, pc_path, args, root=None):
+def inference_ShapeNet(model, pc_path, args, root=None):
     if root is not None:
         pc_file = os.path.join(root, pc_path)
     else:
@@ -130,40 +130,40 @@ def inference_multiple(model, pc_path, args, root=None):
         dataset_categories = json.loads(f.read())
 
     samples = dataset_categories["test"]
-    for s in samples[:3]:
+    for s in samples:
         gt_path = os.path.join(pc_file, "test", "complete", f'{s}.pcd')
         gt = IO.get(gt_path).astype(np.float32)
+        for j in range(15):
+            partial_path = os.path.join(pc_file, "test", "partial", s, f'{j:02}')
+            print(partial_path)
+            # partial_path = os.path.dirname(partial_path)
+            # print(partial_path)
 
-        partial_path = os.path.join(pc_file, "test", "partial", s, f'{6:02}')
-        print(partial_path)
-        # partial_path = os.path.dirname(partial_path)
-        # print(partial_path)
+            # partial_dir = os.path.dirname(partial_path)
+            # List all files in the directory to count available partial files
+            available_files = sorted([f for f in os.listdir(partial_path) if f.endswith('.pcd')])
+            view_count = len(available_files)
+            # print(view_count)
 
-        # partial_dir = os.path.dirname(partial_path)
-        # List all files in the directory to count available partial files
-        available_files = sorted([f for f in os.listdir(partial_path) if f.endswith('.pcd')])
-        view_count = len(available_files)
-        print(view_count)
+            for i in range(view_count):
+                partial = IO.get(os.path.join(partial_path, f'{i:03}.pcd')).astype(np.float32)
+                partial_data = {'input': partial}
+                partial_data = transform(partial_data)
+                partial_data = partial_data['input']
+                ret = model(partial_data.unsqueeze(0).to(args.device.lower()))
 
-        for i in range(view_count):
-            partial = IO.get(os.path.join(partial_path, f'{i:03}.pcd')).astype(np.float32)
-            partial_data = {'input': partial}
-            partial_data = transform(partial_data)
-            partial_data = partial_data['input']
-            ret = model(partial_data.unsqueeze(0).to(args.device.lower()))
+                dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
+                # coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
 
-            dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
-            coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
+                if args.out_pc_root != '':
+                    target_path = os.path.join(args.out_pc_root, s, f'{j:02}')
+                    os.makedirs(target_path, exist_ok=True)
 
-            if args.out_pc_root != '':
-                target_path = os.path.join(args.out_pc_root, s, f'{6:02}')
-                os.makedirs(target_path, exist_ok=True)
-
-                np.save(os.path.join(target_path, f'{i:03}_input.npy'), partial)
-                np.save(os.path.join(target_path, f'{i:03}_input256.npy'), partial_data.numpy())
-                np.save(os.path.join(target_path, f'{i:03}_fine.npy'), dense_points)
-                np.save(os.path.join(target_path, f'{i:03}_coarse.npy'), coarse_points)
-                np.save(os.path.join(target_path, 'gt.npy'), gt)
+                    # np.save(os.path.join(target_path, f'{i:03}_input.npy'), partial)
+                    # np.save(os.path.join(target_path, f'{i:03}_input256.npy'), partial_data.numpy())
+                    np.save(os.path.join(target_path, f'{i:03}_fine.npy'), dense_points)
+                    # np.save(os.path.join(target_path, f'{i:03}_coarse.npy'), coarse_points)
+                    # np.save(os.path.join(target_path, 'gt.npy'), gt)
 
     return
 
@@ -184,7 +184,7 @@ def main():
     #         inference_single(base_model, pc_file, args, config, root=args.pc_root)
     # else:
     #     inference_single(base_model, args.pc, args, config)
-    inference_multiple(base_model, args.pc_root, args)
+    inference_ShapeNet(base_model, args.pc_root, args)
 
 if __name__ == '__main__':
     main()
