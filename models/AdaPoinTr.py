@@ -1191,7 +1191,7 @@ class PCTransformerBase(nn.Module):
         encoder_coor = []
 
         # Apply shared encoder to each point cloud
-        for i in range(self.num_point_clouds):
+        for i in range(len(point_clouds)):
             out_coor, out_x = self.encoder(point_clouds[i])
             encoder_coor.append(out_coor)
             encoder_x.append(out_x)

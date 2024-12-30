@@ -489,8 +489,8 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
     test_metrics = AverageMeter(Metrics.names())
     category_metrics = dict()
     n_samples = len(test_dataloader)  # bs is 1
-    window_size = config.model.num_point_clouds
-
+    # window_size = config.model.num_point_clouds
+    window_size = args.window_size
     with torch.no_grad():
         for idx, (taxonomy_ids, data) in enumerate(test_dataloader):
             taxonomy_id = taxonomy_ids[0] if isinstance(taxonomy_ids[0], str) else taxonomy_ids[0].item()

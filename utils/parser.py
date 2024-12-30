@@ -14,7 +14,8 @@ def get_args():
         default='none',
         help='job launcher')     
     parser.add_argument('--local_rank', type=int, default=0)
-    parser.add_argument('--num_workers', type=int, default=4)   
+    parser.add_argument('--num_workers', type=int, default=4)
+    parser.add_argument('--window_size', type=int, default=9)
     # seed 
     parser.add_argument('--seed', type=int, default=0, help='random seed')
     parser.add_argument(

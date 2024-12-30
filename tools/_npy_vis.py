@@ -6,53 +6,77 @@ from matplotlib.animation import FuncAnimation
 from mpl_toolkits.mplot3d import Axes3D
 
 
-pcd_dir = '../inference_result_PCA_05zfpsr/10555502fa7b3027283ffcfc40c29975/00'
-files = sorted([f for f in os.listdir(pcd_dir) if f.endswith('_fine.npy')])
-point_sequences = [np.load(os.path.join(pcd_dir, file)) for file in files]
+pcd_dir_05 = '../inference_result_PCA_05zfpsr/324434f8eea2839bf63ee8a34069b7c5/10'
+pcd_dir_or = '../inference_result_PCA_originrr/324434f8eea2839bf63ee8a34069b7c5/10'
+pcd_gt_path = '../data/ShapeNet_Car_Seq/test/complete/324434f8eea2839bf63ee8a34069b7c5.pcd'
+pcd_gt = o3d.io.read_point_cloud(pcd_gt_path)
+pcd_gt = np.asarray(pcd_gt.points)
+# pcd_dir = '../inference_result_PCA_originrr/10555502fa7b3027283ffcfc40c29975/00'
+# pcd_dir = '../inference_result_PCA_05zfpsr/Car_111'
+files_05 = sorted([f for f in os.listdir(pcd_dir_05) if f.endswith('_fine.npy')])
+point_sequences_05 = [np.load(os.path.join(pcd_dir_05, file)) for file in files_05]
 
+files_or = sorted([f for f in os.listdir(pcd_dir_or) if f.endswith('_fine.npy')])
+point_sequences_or = [np.load(os.path.join(pcd_dir_or, file)) for file in files_or]
+# point_sequences_or = point_sequences_or[4:]
+# point_sequences_or = point_sequences_or[:-4]
 
-# Set equal aspect ratio for 3D
-def set_equal_aspect(ax, points):
-    max_range = np.ptp(points, axis=0).max() / 2.0
-    mid = points.mean(axis=0)
-    ax.set_xlim(mid[0] - max_range, mid[0] + max_range)
-    ax.set_ylim(mid[1] - max_range, mid[1] + max_range)
-    ax.set_zlim(mid[2] - max_range, mid[2] + max_range)
-
-
-# Initialize the plot
 fig = plt.figure()
 ax = fig.add_subplot(projection='3d')
+# Set equal aspect ratio for 3D
+ax.set_xlim(-0.5, 0.5)
+ax.set_ylim(-0.5, 0.5)
+ax.set_zlim(-0.5, 0.5)
 
 # Set initial view and axis limits
-points = point_sequences[0]
-set_equal_aspect(ax, points)
-ax.scatter(points[:, 2], points[:, 0], points[:, 1], c='blue', alpha=0.6, s=0.1)
-ax.set_title("Frame 0")
-ax.set_xlabel('X')
-ax.set_ylabel('Y')
-ax.set_zlabel('Z')
-ax.view_init(elev=30, azim=45)  # Set isometric view for the first frame
+# ax.scatter(points[:, 2], points[:, 0], points[:, 1], c='blue', alpha=0.6, s=0.1)
+ax.axis('off')
+ax.view_init(elev=0, azim=-90)  # Set isometric view for the first frame
 
 
 # Update function for animation
 def update(frame):
-    points = point_sequences[frame]
+    points = point_sequences_or[frame]
     # Remove the previous points by removing the scatter plot object
     for artist in ax.artists + ax.collections:
         artist.remove()
-    ax.scatter(points[:, 2], points[:, 0], points[:, 1], c='blue', alpha=0.6, s=0.1)
-    set_equal_aspect(ax, points)
-    ax.set_title(f"Frame {frame}")
+    count = int(frame) #+ 4
+    ax.set_title(f"Frame {count}")
+    ax.axis('off')
+    ax.scatter(points[:, 2], points[:, 0], points[:, 1], c='blue', alpha=1, s=0.1)
 
+# for i, frame in enumerate(point_sequences):
+#     update(i)  # Draw the current frame
+#     # plt.show()
+    path = 'D:/Ji/PoinTr/fig/PCA_originrr/324434f8eea2839bf63ee8a34069b7c5/10/'
+    os.makedirs(path, exist_ok=True)
+    plt.savefig(os.path.join(path, f'frame_{frame:03}.png'), dpi=300, bbox_inches='tight', pad_inches=0)  # Save with a sequential filename
 
-# Animate the sequence
-ani = FuncAnimation(fig, update, frames=len(point_sequences), interval=200)
-
-# Show the animation
+ani = FuncAnimation(fig, update, frames=len(point_sequences_or), interval=200)
 plt.show()
-        # o3d.visualization.draw_geometries([pcd])
 
+# ax.set_title(f"Frame gt")
+# ax.axis('off')
+# points_05 = point_sequences_05[33]
+# points_or = point_sequences_or[37]
+# # ax.scatter(points_05[:, 2], points_05[:, 0], points_05[:, 1], c='blue', alpha=1, s=0.1)
+# # ax.scatter(points_or[:, 2], points_or[:, 0], points_or[:, 1], c='blue', alpha=1, s=0.1)
+# ax.scatter(pcd_gt[:, 2], pcd_gt[:, 0], pcd_gt[:, 1], c='blue', alpha=1, s=0.1)
+# plt.show()
+# 10555502fa7b3027283ffcfc40c29975/00/ 10 14
+# 12097984d9c51437b84d944e8a1952a5/06/ 31 35
+# 202648a87dd6ad2573e10a7135e947fe/06/ 31 35
+# 272791fdabf46b2d5921daf0138cfe67/02 33 37
+# 324434f8eea2839bf63ee8a34069b7c5/10/ 35-43 39-47
+
+# plt.close(fig)  # Close the figure when done
+ # # Animate the sequence
+# ani = FuncAnimation(fig, update, frames=len(point_sequences), interval=200)
+#
+# # Show the animation
+# plt.show()
+#         # o3d.visualization.draw_geometries([pcd])
+# ani.save("/Users/jihuang/Documents/zPCA_origino-SN.gif", writer="ffmpeg")
 # pcd_list = []
 # pcd5_list = []
 # for file in sorted(os.listdir(pcd_dir)):

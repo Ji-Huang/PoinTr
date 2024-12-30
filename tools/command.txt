@@ -17,3 +17,8 @@ python scripts/test.py 0 --ckpts ./experiments/AdaPoinTr/PCN_models/ShapeNet_Car
 
 450*15=6750  /16=421
 50*15=750
+
+python scripts/test.py 0 --ckpts ./experiments/AdaPoinTr/PCN_models/PCA_05zfps_augrr/ckpt-best.pth --config ./cfgs/PCN_models/AdaPoinTr.yaml --exp_name PCA_05zfps
+python tools/inference.py cfgs/PCN_models/AdaPoinTr.yaml experiments/AdaPoinTr/PCN_models/PCA_05zfps_augrr/ckpt-best.pth --pc_root LiangDao_normalized\ --out_pc_root inference_result_PCA_zfps_augrr_LD/
+
+python scripts/test.py 0 --ckpts ./experiments/AdaPoinTr/PCN_models/PCA_05zfps_augrr/ckpt-best.pth --config ./cfgs/PCN_models/AdaPoinTr.yaml --window_size 13 --exp_name PCA_05zfps_augrr_rand13
