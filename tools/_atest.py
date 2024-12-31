@@ -383,4 +383,24 @@ def reformat_shapenet():
             print(f'Renamed {tax}, {traj}')
 
 
-reformat_shapenet()
+def reformat_shapenet2():
+    # Define the directory path
+    dir_path1 = 'D:/Ji/PoinTr/LiangDao_normalized'
+
+    # Iterate over taxonomies in the directory
+    for tax in sorted(os.listdir(dir_path1)):
+        tax_path = os.path.join(dir_path1, tax)
+
+        pcd_files = sorted([f for f in os.listdir(tax_path) if f.endswith('.pcd')])
+        print(pcd_files)
+
+        # Now rename the .pcd files in sequential order
+        for idx, old_file in enumerate(pcd_files):
+            new_file_name = f'{idx:03}.pcd'  # Generate a new name (e.g., 001.pcd, 002.pcd, ...)
+            old_file_path = os.path.join(tax_path, old_file)
+            new_file_path = os.path.join(tax_path, new_file_name)
+
+            os.rename(old_file_path, new_file_path)  # Rename the file
+        print(f'Renamed {tax}, {old_file}')
+
+reformat_shapenet2()

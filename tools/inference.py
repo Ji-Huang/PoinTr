@@ -172,10 +172,139 @@ inference_list = ["10555502fa7b3027283ffcfc40c29975",
 "12097984d9c51437b84d944e8a1952a5",
 "202648a87dd6ad2573e10a7135e947fe",
 "272791fdabf46b2d5921daf0138cfe67",
-"324434f8eea2839bf63ee8a34069b7c5"]
+"324434f8eea2839bf63ee8a34069b7c5",
+"3373140534463359fc82e75321e09f82"]
 
 
 def inference_ShapeNet_m(model, pc_path, args, root=None):
+    if root is not None:
+        pc_file = os.path.join(root, pc_path)
+    else:
+        pc_file = pc_path
+
+    # transform = Compose([{
+    #     'callback': 'UpSamplePoints',
+    #     'parameters': {
+    #         'n_points': 256  #2048
+    #     },
+    #     'objects': ['input']
+    # }, {
+    #     'callback': 'ToTensor',
+    #     'objects': ['input']
+    # }])
+
+    transform = Compose([{
+        'callback': 'UpSamplePoints',
+        'parameters': {
+            'n_points': 256  # 2048
+        },
+        'objects': ['input']
+    }, {
+        'callback': 'RandomMirrorPoints',
+        'objects': ['input']
+    }, {
+        'callback': 'RandomRotatePoints',
+        'parameters': {
+            'roll_angle': (-20 / 180 * np.pi, 20 / 180 * np.pi),
+            'pitch_angle': (-10 / 180 * np.pi, 10 / 180 * np.pi),
+            'yaw_angle': (-10 / 180 * np.pi, 10 / 180 * np.pi)
+        },
+        'objects': ['input']
+    }, {
+        'callback': 'RandomTranslatePoints',
+        'parameters': {
+            'translate_range': [(-0.02, 0.02), (-0.02, 0.02), (-0.05, 0.05)]
+        },
+        'objects': ['input']
+    }, {
+        'callback': 'ToTensor',
+        'objects': ['input']
+    }])
+
+    with open(os.path.join(pc_file, "ShapeNet_Car_Seq.json")) as f:
+        dataset_categories = json.loads(f.read())
+
+    samples = dataset_categories["test"]
+    for s in samples:
+        if not s in inference_list:
+            continue
+        else:
+            gt_path = os.path.join(pc_file, "test", "complete", f'{s}.pcd')
+            gt = IO.get(gt_path).astype(np.float32)
+            for j in range(15):
+                partial_path = os.path.join(pc_file, "test", "partial", s, f'{j:02}')
+                print(partial_path)
+                # partial_path = os.path.dirname(partial_path)
+                # print(partial_path)
+
+                # partial_dir = os.path.dirname(partial_path)
+                # List all files in the directory to count available partial files
+                available_files = sorted([f for f in os.listdir(partial_path) if f.endswith('.pcd')])
+                view_count = len(available_files)
+                # print(view_count)
+
+                window_size = 9
+                half_window = window_size // 2
+
+                for i in range(half_window + 1, view_count - half_window - 1):
+                    partials_data = []
+                    # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
+                    for offset in range(-half_window, half_window + 1):
+                        idx = i + offset
+                        # print(idx)
+
+                        # Ensure the index is within valid bounds
+                        if 0 <= idx < len(available_files):
+                            partial = IO.get(os.path.join(partial_path, f'{idx:03}.pcd')).astype(np.float32)
+                            partial_data = {'input': partial}
+                            partial_data = transform(partial_data)
+                            partial_data = partial_data['input']
+                            # Append the concatenated result to the list
+                            partials_data.append(partial_data.unsqueeze(0))
+
+                            # ret = model(partials_data.to(args.device.lower()))
+                    # print(len(partials_data))
+                    concatenated_tensor = torch.cat(partials_data, dim=1).float()  #(B, 256*9, 3)
+                    # print(concatenated_tensor.shape)
+
+                    # Gather coor and x
+                    # fps_idx = pointnet2_utils.furthest_point_sample(concatenated_tensor, 256)  # (B, N)
+                    # updated_tensor = pointnet2_utils.gather_operation(concatenated_tensor.transpose(1, 2).contiguous().float(),
+                    #                                                 fps_idx).transpose(1, 2).contiguous()  # [B, N, 3]
+                    indices = torch.randint(0, 2304, (1, 256), device = concatenated_tensor.device)
+                    updated_tensor = torch.stack([
+                        concatenated_tensor[b, idx, :] for b, idx in enumerate(indices)])
+                    # cuda_window_partials = [window_partial.cuda() for window_partial in window_partials]
+                    # print(fps_idx.shape)
+                    # print(updated_tensor.shape)
+                    # Forward pass
+                    ret = model(updated_tensor.cuda())
+                    # cuda_partials = [partial.to(args.device.lower()) for partial in partials_data]
+                    # ret = model(cuda_partials)
+
+                    dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
+                    # coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
+                    # updated_coor = ret[-2].squeeze(0).detach().cpu().numpy()
+                    # coor = ret[-1].squeeze(0).detach().cpu().numpy()
+                    #
+                    # inputs = [partial.squeeze(0).numpy() for partial in partials_data]
+                    # input = np.vstack(inputs)
+
+                    if args.out_pc_root != '':
+                        target_path = os.path.join(args.out_pc_root, s, f'{j:02}')
+                        os.makedirs(target_path, exist_ok=True)
+
+                        np.save(os.path.join(target_path, f'{i:03}_fine.npy'), dense_points)
+                        # np.save(os.path.join(target_path, f'{i:03}_coarse.npy'), coarse_points)
+                        # np.save(os.path.join(target_path, f'{i:03}_ucoor.npy'), updated_coor)
+                        # np.save(os.path.join(target_path, f'{i:03}_coor.npy'), coor)
+                        # np.save(os.path.join(target_path, f'{i:03}_input.npy'), input)
+                        # np.save(os.path.join(target_path, 'gt.npy'), gt)
+
+    return
+
+
+def inference_LiangDao(model, pc_path, args, root=None):
     if root is not None:
         pc_file = os.path.join(root, pc_path)
     else:
@@ -192,90 +321,67 @@ def inference_ShapeNet_m(model, pc_path, args, root=None):
         'objects': ['input']
     }])
 
-    with open(os.path.join(pc_file, "ShapeNet_Car_Seq.json")) as f:
-        dataset_categories = json.loads(f.read())
+    for tax in sorted(os.listdir(pc_file)):
+        pcd_dir = os.path.join(pc_file, tax)
 
-    samples = dataset_categories["test"]
-    for s in samples:
-        # if not s in inference_list:
-        #     continue
-        # else:
-        gt_path = os.path.join(pc_file, "test", "complete", f'{s}.pcd')
-        gt = IO.get(gt_path).astype(np.float32)
-        for j in range(15):
-            partial_path = os.path.join(pc_file, "test", "partial", s, f'{j:02}')
-            print(partial_path)
-            # partial_path = os.path.dirname(partial_path)
-            # print(partial_path)
+        available_files = sorted([f for f in os.listdir(pcd_dir) if f.endswith('.pcd')])
+        view_count = len(available_files)
+        print(view_count)
 
-            # partial_dir = os.path.dirname(partial_path)
-            # List all files in the directory to count available partial files
-            available_files = sorted([f for f in os.listdir(partial_path) if f.endswith('.pcd')])
-            view_count = len(available_files)
-            # print(view_count)
+        window_size = 9
+        half_window = window_size // 2
 
-            window_size = 9
-            half_window = window_size // 2
+        # # Iterate through each file
+        # for i in range(len(available_files)):
+        # rand_idx = 6
+        for i in range(half_window + 1, view_count - half_window - 1):
+            partials_data = []
+            # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
+            for offset in range(-half_window, half_window + 1):
+                idx = i + offset
 
-            for i in range(half_window + 1, view_count - half_window - 1):
-                partials_data = []
-                # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
-                for offset in range(-half_window, half_window + 1):
-                    idx = i + offset
-                    # print(idx)
+                # Ensure the index is within valid bounds
+                if 0 <= idx < len(available_files):
+                    partial = IO.get(os.path.join(pcd_dir, available_files[idx])).astype(np.float32)
+                    partial_data = {'input': partial}
+                    partial_data = transform(partial_data)
+                    partial_data = partial_data['input']
+                    # Append the concatenated result to the list
+                    partials_data.append(partial_data.unsqueeze(0))
 
-                    # Ensure the index is within valid bounds
-                    if 0 <= idx < len(available_files):
-                        partial = IO.get(os.path.join(partial_path, f'{idx:03}.pcd')).astype(np.float32)
-                        partial_data = {'input': partial}
-                        partial_data = transform(partial_data)
-                        partial_data = partial_data['input']
-                        # Append the concatenated result to the list
-                        partials_data.append(partial_data.unsqueeze(0))
+            # ret = model(partials_data.to(args.device.lower()))
+            concatenated_tensor = torch.cat(partials_data, dim=1).float()  # (B, 256*9, 3)
+            # print(concatenated_tensor.shape)
 
-                        # ret = model(partials_data.to(args.device.lower()))
-                # print(len(partials_data))
-                concatenated_tensor = torch.cat(partials_data, dim=1).float()  #(B, 256*9, 3)
-                # print(concatenated_tensor.shape)
+            # Gather coor and x
+            # fps_idx = pointnet2_utils.furthest_point_sample(concatenated_tensor, 256)  # (B, N)
+            # updated_tensor = pointnet2_utils.gather_operation(concatenated_tensor.transpose(1, 2).contiguous().float(),
+            #                                                 fps_idx).transpose(1, 2).contiguous()  # [B, N, 3]
+            indices = torch.randint(0, 2304, (1, 256), device=concatenated_tensor.device)
+            updated_tensor = torch.stack([
+                concatenated_tensor[b, idx, :] for b, idx in enumerate(indices)])
+            # cuda_partials = [partial.to(args.device.lower()) for partial in partials_data]
+            ret = model(updated_tensor.cuda())
 
-                # Gather coor and x
-                # fps_idx = pointnet2_utils.furthest_point_sample(concatenated_tensor, 256)  # (B, N)
-                # updated_tensor = pointnet2_utils.gather_operation(concatenated_tensor.transpose(1, 2).contiguous().float(),
-                #                                                 fps_idx).transpose(1, 2).contiguous()  # [B, N, 3]
-                indices = torch.randint(0, 2304, (1, 256), device = concatenated_tensor.device)
-                updated_tensor = torch.stack([
-                    concatenated_tensor[b, idx, :] for b, idx in enumerate(indices)])
-                # cuda_window_partials = [window_partial.cuda() for window_partial in window_partials]
-                # print(fps_idx.shape)
-                # print(updated_tensor.shape)
-                # Forward pass
-                ret = model(updated_tensor.cuda())
-                # cuda_partials = [partial.to(args.device.lower()) for partial in partials_data]
-                # ret = model(cuda_partials)
+            dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
+            # coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
+            # updated_coor = ret[-2].squeeze(0).detach().cpu().numpy()
+            # coor = ret[-1].squeeze(0).detach().cpu().numpy()
 
-                dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
-                # coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
-                # updated_coor = ret[-2].squeeze(0).detach().cpu().numpy()
-                # coor = ret[-1].squeeze(0).detach().cpu().numpy()
-                #
-                # inputs = [partial.squeeze(0).numpy() for partial in partials_data]
-                # input = np.vstack(inputs)
+            # inputs = [partial.squeeze(0).numpy() for partial in partials_data]
+            # input = np.vstack(inputs)
 
-                if args.out_pc_root != '':
-                    target_path = os.path.join(args.out_pc_root, s, f'{j:02}')
-                    os.makedirs(target_path, exist_ok=True)
+            if args.out_pc_root != '':
+                target_path = os.path.join(args.out_pc_root, tax)
+                os.makedirs(target_path, exist_ok=True)
 
-                    np.save(os.path.join(target_path, f'{i:03}_fine.npy'), dense_points)
-                    # np.save(os.path.join(target_path, f'{i:03}_coarse.npy'), coarse_points)
-                    # np.save(os.path.join(target_path, f'{i:03}_ucoor.npy'), updated_coor)
-                    # np.save(os.path.join(target_path, f'{i:03}_coor.npy'), coor)
-                    # np.save(os.path.join(target_path, f'{i:03}_input.npy'), input)
-                    # np.save(os.path.join(target_path, 'gt.npy'), gt)
+                np.save(os.path.join(target_path, f'{i:03}_fine.npy'), dense_points)
+                # np.save(os.path.join(target_path, f'{available_files[i][8:13]}_coarse.npy'), coarse_points)
+                # np.save(os.path.join(target_path, f'{i:03}_ucoor.npy'), updated_coor)
+                # np.save(os.path.join(target_path, f'{i:03}_coor.npy'), coor)
+                # np.save(os.path.join(target_path, f'{available_files[i][8:13]}_input.npy'), input)
 
     return
-
-
-
 
 
 def main():
@@ -295,7 +401,7 @@ def main():
     #         inference_single(base_model, pc_file, args, config, root=args.pc_root)
     # else:
     #     inference_single(base_model, args.pc, args, config)
-    inference_ShapeNet_m(base_model, args.pc_root, args)
+    inference_LiangDao(base_model, args.pc_root, args)
 
 if __name__ == '__main__':
     main()
