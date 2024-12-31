@@ -58,7 +58,7 @@ def calculate_average_cdl1(root_dir, chamfer_dist_fn, device='cuda'):
     return results
 
 # Example usage
-root_dir = "../inference_result_PCA_originrr/"  # Replace with your output directory
+root_dir = "../inference_result_PCA_originrr_ws09r/"  # Replace with your output directory
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 chamfer_dist_fn = ChamferDistanceL1()  # Initialize ChamferDistanceL1
 

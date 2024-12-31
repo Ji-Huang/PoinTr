@@ -40,6 +40,19 @@ class ShapeNet_Car_Seq(data.Dataset):
 
     def _get_transforms(self, subset):
         if subset == 'train':
+            # return data_transforms.Compose([{
+            #     'callback': 'UpSamplePoints',
+            #     'parameters': {
+            #         'n_points': 256  #2048
+            #     },
+            #     'objects': ['partial']
+            # }, {
+            #     'callback': 'RandomMirrorPoints',
+            #     'objects': ['partial', 'gt']
+            # }, {
+            #     'callback': 'ToTensor',
+            #     'objects': ['partial', 'gt']
+            # }])
             return data_transforms.Compose([{
                 'callback': 'UpSamplePoints',
                 'parameters': {
@@ -50,14 +63,56 @@ class ShapeNet_Car_Seq(data.Dataset):
                 'callback': 'RandomMirrorPoints',
                 'objects': ['partial', 'gt']
             }, {
+                'callback': 'RandomRotatePoints',
+                'parameters': {
+                    'roll_angle': (-20/180*np.pi, 20/180*np.pi),
+                    'pitch_angle': (-10/180*np.pi, 10/180*np.pi),
+                    'yaw_angle': (-10/180*np.pi, 10/180*np.pi)
+                },
+                'objects': ['partial']
+            }, {
+                'callback': 'RandomTranslatePoints',
+                'parameters': {
+                    'translate_range': [(-0.02, 0.02), (-0.02, 0.02), (-0.05, 0.05)]
+                },
+                'objects': ['partial']
+            }, {
                 'callback': 'ToTensor',
                 'objects': ['partial', 'gt']
             }])
         else:
+            # return data_transforms.Compose([{
+            #     'callback': 'UpSamplePoints',  #RandomSamplePoints
+            #     'parameters': {
+            #         'n_points': 256  #2048
+            #     },
+            #     'objects': ['partial']
+            # }, {
+            #     'callback': 'ToTensor',
+            #     'objects': ['partial', 'gt']
+            # }])
+
             return data_transforms.Compose([{
-                'callback': 'UpSamplePoints',  #RandomSamplePoints
+                'callback': 'UpSamplePoints',
                 'parameters': {
                     'n_points': 256  #2048
+                },
+                'objects': ['partial']
+            }, {
+                'callback': 'RandomMirrorPoints',
+                'objects': ['partial', 'gt']
+            }, {
+                'callback': 'RandomRotatePoints',
+                'parameters': {
+                    'roll_angle': (-20/180*np.pi, 20/180*np.pi),
+                    'pitch_angle': (-10/180*np.pi, 10/180*np.pi),
+                    'yaw_angle': (-10/180*np.pi, 10/180*np.pi)
+                },
+                'objects': ['partial']
+            }, {
+                'callback': 'RandomTranslatePoints',
+                'parameters': {
+                    'translate_range': [(-0.02, 0.02), (-0.02, 0.02), (-0.05, 0.05)]
                 },
                 'objects': ['partial']
             }, {
@@ -166,6 +221,35 @@ class ShapeNet_Car_Seq(data.Dataset):
             # List all files in the directory to count available partial files
             available_files = sorted([f for f in os.listdir(partial_dir) if f.endswith('.pcd')])
 
+            for idx in range(len(available_files)):
+                partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
+                partial_data = {'partial': partial}
+                if self.transforms is not None:
+                    partial_data = self.transforms(partial_data)
+                # Append the concatenated result to the list
+                partials_data.append(partial_data['partial'])
+
+            # window_size = 1
+            # half_window = window_size // 2
+            #
+            # # # Iterate through each file
+            # # for i in range(len(available_files)):
+            # # rand_idx = random.randint(0, len(available_files))
+            # rand_idx = 6
+            #
+            # # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
+            # for offset in range(-half_window, half_window + 1):
+            #     idx = rand_idx + offset
+            #
+            #     # Ensure the index is within valid bounds
+            #     if 0 <= idx < len(available_files):
+            #         partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
+            #         partial_data = {'partial': partial}
+            #         if self.transforms is not None:
+            #             partial_data = self.transforms(partial_data)
+            #         # Append the concatenated result to the list
+            #         partials_data.append(partial_data['partial'])
+
             # for idx in range(len(available_files)):
             #     partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
             #     partial_data = {'partial': partial}
@@ -174,26 +258,25 @@ class ShapeNet_Car_Seq(data.Dataset):
             #     # Append the concatenated result to the list
             #     partials_data.append(partial_data['partial'])
 
-            window_size = 1
-            half_window = window_size // 2
-
-            # # Iterate through each file
-            # for i in range(len(available_files)):
-            # rand_idx = random.randint(0, len(available_files))
-            rand_idx = 6
-
-            # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
-            for offset in range(-half_window, half_window + 1):
-                idx = rand_idx + offset
-
-                # Ensure the index is within valid bounds
-                if 0 <= idx < len(available_files):
-                    partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
-                    partial_data = {'partial': partial}
-                    if self.transforms is not None:
-                        partial_data = self.transforms(partial_data)
-                    # Append the concatenated result to the list
-                    partials_data.append(partial_data['partial'])
+            # window_size = 9
+            # half_window = window_size // 2
+            #
+            # # # Iterate through each file
+            # # for i in range(len(available_files)):
+            # rand_idx = 6
+            #
+            # # Loop through the window size to gather partials from (i - half_window) to (i + half_window)
+            # for offset in range(-half_window, half_window + 1):
+            #     idx = rand_idx + offset
+            #
+            #     # Ensure the index is within valid bounds
+            #     if 0 <= idx < len(available_files):
+            #         partial = IO.get(os.path.join(partial_dir, f'{idx:03}.pcd')).astype(np.float32)
+            #         partial_data = {'partial': partial}
+            #         if self.transforms is not None:
+            #             partial_data = self.transforms(partial_data)
+            #         # Append the concatenated result to the list
+            #         partials_data.append(partial_data['partial'])
 
 
         # window_size = random.choice([1, 3, 5, 7, 9, 11, 13])

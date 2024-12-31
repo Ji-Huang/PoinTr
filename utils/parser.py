@@ -32,6 +32,7 @@ def get_args():
     parser.add_argument('--start_ckpts', type = str, default=None, help = 'reload used ckpt path')
     parser.add_argument('--ckpts', type = str, default=None, help = 'test used ckpt path')
     parser.add_argument('--val_freq', type = int, default=1, help = 'test freq')
+    parser.add_argument('--window_size', type=int, default=1)
     parser.add_argument(
         '--resume', 
         action='store_true', 
