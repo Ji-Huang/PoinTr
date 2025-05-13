@@ -3,6 +3,10 @@ cd D:\ji\pointr\experiments\adapointr\pcn_models\TFBoard
 conda activate ji_torch
 tensorboard --logdir=./
 
+cd D:\ji\pointr\experiments\pointr\pcn_models\TFBoard
+conda activate ji_torch
+tensorboard --logdir=./
+
 cd D:\ji\pointr
 conda activate ji_o3d
 
@@ -17,3 +21,5 @@ python scripts/test.py 0 --ckpts ./experiments/AdaPoinTr/PCN_models/PCA_01o_ws13
 
 450*15=6750  /16=421
 50*15=750
+
+Start-Job -ScriptBlock { Set-Location -Path 'D:\Ji\PoinTr'; python scripts/test.py 0 --ckpts ./experiments/PoinTr/PCN_models/baseline5/ckpt-best.pth --config ./cfgs/PCN_models/PoinTr.yaml --exp_name baseline5}

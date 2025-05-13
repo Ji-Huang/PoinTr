@@ -92,6 +92,7 @@ class PoinTr(nn.Module):
         q, coarse_point_cloud = self.base_model(xyz) # B M C and B M 3
     
         B, M ,C = q.shape
+        # print(q.shape)
 
         global_feature = self.increase_dim(q.transpose(1,2)).transpose(1,2) # B M 1024
         global_feature = torch.max(global_feature, dim=1)[0] # B 1024
@@ -112,11 +113,15 @@ class PoinTr(nn.Module):
         # NOTE: fc
         # relative_xyz = self.refine(rebuild_feature)  # BM 3S
         # rebuild_points = (relative_xyz.reshape(B,M,3,-1) + coarse_point_cloud.unsqueeze(-1)).transpose(2,3).reshape(B, -1, 3)
-
+        # print(rebuild_points.shape)
         # cat the input
         inp_sparse = fps(xyz, self.num_query)
+        # print(xyz.shape)
+        # print(inp_sparse.shape)
         coarse_point_cloud = torch.cat([coarse_point_cloud, inp_sparse], dim=1).contiguous()
+        # print(coarse_point_cloud.shape)
         rebuild_points = torch.cat([rebuild_points, xyz],dim=1).contiguous()
+        # print(rebuild_points.shape)
 
         ret = (coarse_point_cloud, rebuild_points)
         return ret

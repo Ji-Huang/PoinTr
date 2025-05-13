@@ -121,7 +121,6 @@ def run_net(args, config, train_writer=None, val_writer=None):
                 # partial = data[0][random.randint(0, 14)].cuda()
                 partial_views = data[0]  # A list of partial pcds (window_size in each traj)
                 gt = data[1].cuda()
-                # print(len(partial_views))
 
                 # total_sparse_loss = 0
                 # total_dense_loss = 0
@@ -292,7 +291,6 @@ def validate(base_model, test_dataloader, epoch, ChamferDisL1, ChamferDisL2, val
                 # partial = data[0][random.randint(0, 14)].cuda()
                 partial_views = data[0]  # A list of partial pcds: (1 pcd * 15 trajs) or (all pcds in 1 traj)
                 gt = data[1].cuda()
-
                 # Iterate over each partial view
                 # view_count = len(partial_views)
                 # cumulative_metrics = None  # Re-initialize for each sample in the dataloader
@@ -329,7 +327,7 @@ def validate(base_model, test_dataloader, epoch, ChamferDisL1, ChamferDisL2, val
                 # avg_metrics = [metric / view_count for metric in cumulative_metrics]
 
                 # cuda_partials = [partial_view.cuda() for partial_view in partial_views]
-                cuda_partials = partial_views[0].cuda()
+                cuda_partials = partial_views[4].cuda()
 
                 # Forward pass for the current partial view
                 ret = base_model(cuda_partials)
@@ -491,7 +489,6 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
     test_metrics = AverageMeter(Metrics.names())
     category_metrics = dict()
     n_samples = len(test_dataloader)  # bs is 1
-    window_size = args.window_size
 
     with torch.no_grad():
         for idx, (taxonomy_ids, data) in enumerate(test_dataloader):
@@ -513,66 +510,15 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
                 gt = data[1].cuda()
 
                 view_count = len(partial_views)
-                half_window = window_size // 2
 
                 # Initialize total_metrics to accumulate metrics across views
                 total_metrics = [0.0] * len(Metrics.names())
 
-                # # Main loop through files, avoiding boundaries based on window size
-                # for i in range(view_count):
-                #
-                #     # Forward pass
-                #     ret = base_model(partial_views[i].cuda())
-                #     coarse_points = ret[0]
-                #     dense_points = ret[-1]
-                #
-                #     # Compute losses for each view and accumulate
-                #     total_sparse_loss_l1 += ChamferDisL1(coarse_points, gt)
-                #     total_sparse_loss_l2 += ChamferDisL2(coarse_points, gt)
-                #     total_dense_loss_l1 += ChamferDisL1(dense_points, gt)
-                #     total_dense_loss_l2 += ChamferDisL2(dense_points, gt)
-                #
-                #     _metrics = Metrics.get(dense_points, gt, require_emd=False)
-                #     _metrics = [m.item() for m in _metrics]
-                #     # Accumulate metrics
-                #     for j, metric in enumerate(_metrics):
-                #         total_metrics[j] += metric
-                #
-                # # Average the losses over the number of views
-                # avg_sparse_loss_l1 = total_sparse_loss_l1 / view_count
-                # avg_sparse_loss_l2 = total_sparse_loss_l2 / view_count
-                # avg_dense_loss_l1 = total_dense_loss_l1 / view_count
-                # avg_dense_loss_l2 = total_dense_loss_l2 / view_count
+                # Main loop through files, avoiding boundaries based on window size
+                for i in range(view_count):
 
-                for i in range(half_window + 1, view_count - half_window - 1):
-                    # Temporary list to gather partials within the current window
-                    window_partials = []
-
-                    # Loop through the window size to gather partials from (idx - half_window) to (idx + half_window)
-                    for offset in range(-half_window, half_window + 1):
-                        current_idx = i + offset
-
-                        # Ensure the index is within valid bounds
-                        if 0 <= current_idx < view_count:
-                            partial_data = partial_views[current_idx]
-                            window_partials.append(partial_data)
-                            # print(partial_data.shape)
-                    concatenated_tensor = torch.cat(window_partials, dim=1).float().cuda()  #(B, 256*9, 3)
-                    # print(concatenated_tensor.shape)
-
-                    # Gather coor and x
-                    # fps_idx = pointnet2_utils.furthest_point_sample(concatenated_tensor, 256)  # (B, N)
-                    # updated_tensor = pointnet2_utils.gather_operation(concatenated_tensor.transpose(1, 2).contiguous().float(),
-                    #                                                 fps_idx).transpose(1, 2).contiguous()  # [B, N, 3]
-                    indices = torch.randint(0, 2304, (1, 256), device = concatenated_tensor.device)
-                    updated_tensor = torch.stack([
-                        concatenated_tensor[b, idx, :] for b, idx in enumerate(indices)
-                    ])
-                    # cuda_window_partials = [window_partial.cuda() for window_partial in window_partials]
-                    # print(fps_idx.shape)
-                    # print(updated_tensor.shape)
                     # Forward pass
-                    ret = base_model(updated_tensor)
+                    ret = base_model(partial_views[i].cuda())
                     coarse_points = ret[0]
                     dense_points = ret[-1]
 
@@ -581,7 +527,6 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
                     total_sparse_loss_l2 += ChamferDisL2(coarse_points, gt)
                     total_dense_loss_l1 += ChamferDisL1(dense_points, gt)
                     total_dense_loss_l2 += ChamferDisL2(dense_points, gt)
-                    # total_emd_loss += Metrics.get_emd(dense_points, gt)
 
                     _metrics = Metrics.get(dense_points, gt, require_emd=False)
                     _metrics = [m.item() for m in _metrics]
@@ -589,12 +534,11 @@ def test(base_model, test_dataloader, ChamferDisL1, ChamferDisL2, args, config, 
                     for j, metric in enumerate(_metrics):
                         total_metrics[j] += metric
 
-                num_windows = view_count - 2 * half_window - 1
                 # Average the losses over the number of views
-                avg_sparse_loss_l1 = total_sparse_loss_l1 / num_windows
-                avg_sparse_loss_l2 = total_sparse_loss_l2 / num_windows
-                avg_dense_loss_l1 = total_dense_loss_l1 / num_windows
-                avg_dense_loss_l2 = total_dense_loss_l2 / num_windows
+                avg_sparse_loss_l1 = total_sparse_loss_l1 / view_count
+                avg_sparse_loss_l2 = total_sparse_loss_l2 / view_count
+                avg_dense_loss_l1 = total_dense_loss_l1 / view_count
+                avg_dense_loss_l2 = total_dense_loss_l2 / view_count
 
                 avg_metrics = [total_metric / view_count for total_metric in total_metrics]
 

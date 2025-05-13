@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="ji_o3d" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="ji_o3d" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.11" project-jdk-type="Python SDK" />
 </project>

@@ -40,6 +40,19 @@ class ShapeNet_Car_Seq(data.Dataset):
 
     def _get_transforms(self, subset):
         if subset == 'train':
+            return data_transforms.Compose([{
+                'callback': 'UpSamplePoints',
+                'parameters': {
+                    'n_points': 256  #2048
+                },
+                'objects': ['partial']
+            }, {
+                'callback': 'RandomMirrorPoints',
+                'objects': ['partial', 'gt']
+            }, {
+                'callback': 'ToTensor',
+                'objects': ['partial', 'gt']
+            }])
             # return data_transforms.Compose([{
             #     'callback': 'UpSamplePoints',
             #     'parameters': {
@@ -50,75 +63,62 @@ class ShapeNet_Car_Seq(data.Dataset):
             #     'callback': 'RandomMirrorPoints',
             #     'objects': ['partial', 'gt']
             # }, {
-            #     'callback': 'ToTensor',
-            #     'objects': ['partial', 'gt']
-            # }])
-            return data_transforms.Compose([{
-                'callback': 'UpSamplePoints',
-                'parameters': {
-                    'n_points': 256  #2048
-                },
-                'objects': ['partial']
-            }, {
-                'callback': 'RandomMirrorPoints',
-                'objects': ['partial', 'gt']
-            }, {
-                'callback': 'RandomRotatePoints',
-                'parameters': {
-                    'roll_angle': (-20/180*np.pi, 20/180*np.pi),
-                    'pitch_angle': (-10/180*np.pi, 10/180*np.pi),
-                    'yaw_angle': (-10/180*np.pi, 10/180*np.pi)
-                },
-                'objects': ['partial']
-            }, {
-                'callback': 'RandomTranslatePoints',
-                'parameters': {
-                    'translate_range': [(-0.02, 0.02), (-0.02, 0.02), (-0.05, 0.05)]
-                },
-                'objects': ['partial']
-            }, {
-                'callback': 'ToTensor',
-                'objects': ['partial', 'gt']
-            }])
-        else:
-            # return data_transforms.Compose([{
-            #     'callback': 'UpSamplePoints',  #RandomSamplePoints
+            #     'callback': 'RandomRotatePoints',
             #     'parameters': {
-            #         'n_points': 256  #2048
+            #         'roll_angle': (-20/180*np.pi, 20/180*np.pi),
+            #         'pitch_angle': (-10/180*np.pi, 10/180*np.pi),
+            #         'yaw_angle': (-10/180*np.pi, 10/180*np.pi)
+            #     },
+            #     'objects': ['partial']
+            # }, {
+            #     'callback': 'RandomTranslatePoints',
+            #     'parameters': {
+            #         'translate_range': [(-0.02, 0.02), (-0.02, 0.02), (-0.05, 0.05)]
             #     },
             #     'objects': ['partial']
             # }, {
             #     'callback': 'ToTensor',
             #     'objects': ['partial', 'gt']
             # }])
-
+        else:
             return data_transforms.Compose([{
-                'callback': 'UpSamplePoints',
+                'callback': 'UpSamplePoints',  #RandomSamplePoints
                 'parameters': {
                     'n_points': 256  #2048
-                },
-                'objects': ['partial']
-            }, {
-                'callback': 'RandomMirrorPoints',
-                'objects': ['partial', 'gt']
-            }, {
-                'callback': 'RandomRotatePoints',
-                'parameters': {
-                    'roll_angle': (-20/180*np.pi, 20/180*np.pi),
-                    'pitch_angle': (-10/180*np.pi, 10/180*np.pi),
-                    'yaw_angle': (-10/180*np.pi, 10/180*np.pi)
-                },
-                'objects': ['partial']
-            }, {
-                'callback': 'RandomTranslatePoints',
-                'parameters': {
-                    'translate_range': [(-0.02, 0.02), (-0.02, 0.02), (-0.05, 0.05)]
                 },
                 'objects': ['partial']
             }, {
                 'callback': 'ToTensor',
                 'objects': ['partial', 'gt']
             }])
+
+            # return data_transforms.Compose([{
+            #     'callback': 'UpSamplePoints',
+            #     'parameters': {
+            #         'n_points': 256  #2048
+            #     },
+            #     'objects': ['partial']
+            # }, {
+            #     'callback': 'RandomMirrorPoints',
+            #     'objects': ['partial', 'gt']
+            # }, {
+            #     'callback': 'RandomRotatePoints',
+            #     'parameters': {
+            #         'roll_angle': (-20/180*np.pi, 20/180*np.pi),
+            #         'pitch_angle': (-10/180*np.pi, 10/180*np.pi),
+            #         'yaw_angle': (-10/180*np.pi, 10/180*np.pi)
+            #     },
+            #     'objects': ['partial']
+            # }, {
+            #     'callback': 'RandomTranslatePoints',
+            #     'parameters': {
+            #         'translate_range': [(-0.02, 0.02), (-0.02, 0.02), (-0.05, 0.05)]
+            #     },
+            #     'objects': ['partial']
+            # }, {
+            #     'callback': 'ToTensor',
+            #     'objects': ['partial', 'gt']
+            # }])
 
     def _get_file_list(self, subset, n_trajs):
         """Prepare file list for the dataset"""
