@@ -16,6 +16,9 @@ from extensions.chamfer_dist import ChamferDistanceL2
 from extensions.gridding_loss import GriddingLoss
 from .build import MODELS
 
+# from utils import parser, dist_utils, misc
+# args = parser.get_args()
+
 
 
 class RandomPointSampling(torch.nn.Module):
@@ -162,6 +165,12 @@ class GRNet(torch.nn.Module):
         # print(sparse_cloud.size())      # torch.Size([batch_size, 262144, 3])
         sparse_cloud = self.point_sampling(sparse_cloud, partial_cloud)
         # print(sparse_cloud.size())      # torch.Size([batch_size, num_pred//8, 3])
+
+        sparse_cloud = sparse_cloud.float()
+        pt_features_32_r = pt_features_32_r.float()
+        pt_features_16_r = pt_features_16_r.float()
+        pt_features_8_r = pt_features_8_r.float()
+
         point_features_32 = self.feature_sampling(sparse_cloud, pt_features_32_r).view(-1, self.num_pred//8, 256)
         # print(point_features_32.size()) # torch.Size([batch_size, num_pred//8, 256])
         point_features_16 = self.feature_sampling(sparse_cloud, pt_features_16_r).view(-1, self.num_pred//8, 512)
@@ -170,6 +179,9 @@ class GRNet(torch.nn.Module):
         # print(point_features_8.size())  # torch.Size([batch_size, num_pred//8, 1024])
         point_features = torch.cat([point_features_32, point_features_16, point_features_8], dim=2)
         # print(point_features.size())    # torch.Size([batch_size, num_pred//8, 1792])
+        
+        point_features = point_features.half()
+
         point_features = self.fc11(point_features)
         # print(point_features.size())    # torch.Size([batch_size, num_pred//8, 1792])
         point_features = self.fc12(point_features)

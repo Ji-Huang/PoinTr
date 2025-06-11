@@ -3,7 +3,7 @@ cd D:\ji\pointr\experiments\adapointr\pcn_models\TFBoard
 conda activate ji_torch
 tensorboard --logdir=./
 
-cd D:\ji\pointr\experiments\pointr\pcn_models\TFBoard
+cd D:\ji\pointr\experiments\grnet\pcn_models\TFBoard
 conda activate ji_torch
 tensorboard --logdir=./
 
