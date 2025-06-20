@@ -1,7 +1,7 @@
 optimizer : {
   type: AdamW,
   kwargs: {
-  lr : 0.00004,  #0.0005
+  lr : 0.00008,  #0.0005
   weight_decay : 0.0005 #0.0005  w0.001
 }}
 
@@ -18,7 +18,7 @@ scheduler: {
   kwargs: {
     t_max: 320,               # This corresponds to t_initial in the scheduler
     min_lr: 0.000001,            # This corresponds to lr_min in the scheduler
-    initial_epochs: 10,       # This corresponds to warmup_t in the scheduler  #10 4
+    initial_epochs: 20,       # This corresponds to warmup_t in the scheduler  #10 4
     warmup_lr_init: 0.00001,
     t_in_epochs: True
 }}
