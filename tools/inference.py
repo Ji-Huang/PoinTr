@@ -151,7 +151,10 @@ def inference_ShapeNet(model, pc_path, args, root=None):
                 partial_data = {'input': partial}
                 partial_data = transform(partial_data)
                 partial_data = partial_data['input']
-                ret = model(partial_data.unsqueeze(0).to(args.device.lower()))
+                
+                partial_data = partial_data.to(dtype=torch.float32)
+                model = model.to(dtype=torch.float32, device=args.device.lower())
+                ret = model(partial_data.unsqueeze(0).to(dtype=torch.float32, device=args.device.lower()))
 
                 dense_points = ret[-1].squeeze(0).detach().cpu().numpy()
                 # coarse_points = ret[0].squeeze(0).detach().cpu().numpy()
@@ -401,7 +404,7 @@ def main():
     #         inference_single(base_model, pc_file, args, config, root=args.pc_root)
     # else:
     #     inference_single(base_model, args.pc, args, config)
-    inference_LiangDao(base_model, args.pc_root, args)
+    inference_ShapeNet(base_model, args.pc_root, args)
 
 if __name__ == '__main__':
     main()

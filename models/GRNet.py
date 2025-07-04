@@ -180,7 +180,7 @@ class GRNet(torch.nn.Module):
         point_features = torch.cat([point_features_32, point_features_16, point_features_8], dim=2)
         # print(point_features.size())    # torch.Size([batch_size, num_pred//8, 1792])
         
-        point_features = point_features.half()
+        # point_features = point_features.half()
 
         point_features = self.fc11(point_features)
         # print(point_features.size())    # torch.Size([batch_size, num_pred//8, 1792])

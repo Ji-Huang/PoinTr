@@ -12,6 +12,7 @@ pcd_dir_orm = '../inference_result_PCA_originrr_ws09/10555502fa7b3027283ffcfc40c
 pcd_dir_ormr = '../inference_result_PCA_originrr_ws09r/324434f8eea2839bf63ee8a34069b7c5/10'
 pcd_gt_path = '../data/ShapeNet_Car_Seq/test/complete/3373140534463359fc82e75321e09f82.pcd'
 pcd_dir_p = '../data/ShapeNet_Car_Seq/test/partial/272791fdabf46b2d5921daf0138cfe67/02'
+pcd_dir_GRNet = '../inferences/ShapeNet_GRNet/272791fdabf46b2d5921daf0138cfe67/02'
 pcd_gt = o3d.io.read_point_cloud(pcd_gt_path)
 pcd_gt = np.asarray(pcd_gt.points)
 # pcd_dir = '../inference_result_PCA_originrr/10555502fa7b3027283ffcfc40c29975/00'
@@ -37,6 +38,9 @@ point_sequences_orm = [np.load(os.path.join(pcd_dir_orm, file)) for file in file
 
 files_ormr = sorted([f for f in os.listdir(pcd_dir_ormr) if f.endswith('_fine.npy')])
 point_sequences_ormr = [np.load(os.path.join(pcd_dir_ormr, file)) for file in files_ormr]
+
+files_GRNet = sorted([f for f in os.listdir(pcd_dir_GRNet) if f.endswith('_fine.npy')])
+point_sequences_GRNet = [np.load(os.path.join(pcd_dir_GRNet, file)) for file in files_GRNet]
 # point_sequences_or = point_sequences_or[4:]
 # point_sequences_or = point_sequences_or[:-4]
 
@@ -81,12 +85,14 @@ points_or = point_sequences_or[43]
 points_orm = point_sequences_orm[10]
 points_ormr = point_sequences_ormr[39]
 points_p = point_sequences_p[41]
+points_GRNet = point_sequences_GRNet[41]
 # ax.scatter(points_05[:, 2], points_05[:, 0], points_05[:, 1], c='blue', alpha=1, s=0.1)
 # ax.scatter(points_or[:, 2], points_or[:, 0], points_or[:, 1], c='blue', alpha=1, s=0.1)
 # ax.scatter(points_orm[:, 2], points_orm[:, 0], points_orm[:, 1], c='blue', alpha=1, s=0.1)
 # ax.scatter(points_ormr[:, 2], points_ormr[:, 0], points_ormr[:, 1], c='blue', alpha=1, s=0.1)
 # ax.scatter(points_p[:, 2], points_p[:, 0], points_p[:, 1], c='red', alpha=1, s=0.1)
-ax.scatter(pcd_gt[:, 2], pcd_gt[:, 0], pcd_gt[:, 1], c='blue', alpha=1, s=0.1)
+# ax.scatter(pcd_gt[:, 2], pcd_gt[:, 0], pcd_gt[:, 1], c='blue', alpha=1, s=0.1)
+ax.scatter(points_GRNet[:, 2], pcd_gt[:, 0], pcd_gt[:, 1], c='blue', alpha=1, s=0.1)
 plt.show()
 # 10555502fa7b3027283ffcfc40c29975/02/ 25 29  # 00 10 14
 # 12097984d9c51437b84d944e8a1952a5/06/ 31 35
